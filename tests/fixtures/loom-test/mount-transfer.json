@@ -1,0 +1,91 @@
+{
+  "workflow": {
+    "name": "mount-transfer",
+    "artifacts": [
+      {
+        "name": "source",
+        "ty": "SourceTree",
+        "producer": 0
+      },
+      {
+        "name": "binary",
+        "ty": "Binary",
+        "producer": 1
+      }
+    ],
+    "actions": [
+      {
+        "name": "prepare",
+        "op": "prepare",
+        "outputs": [
+          0
+        ],
+        "actor_constraints": [
+          {
+            "Specific": 0
+          }
+        ],
+        "shell": {
+          "script": "echo prepared",
+          "capture": "NoCapture"
+        }
+      },
+      {
+        "name": "build",
+        "op": "build",
+        "inputs": [
+          0
+        ],
+        "outputs": [
+          1
+        ],
+        "actor_constraints": [
+          {
+            "Specific": 0
+          }
+        ],
+        "shell": {
+          "script": "echo built",
+          "capture": "NoCapture"
+        }
+      }
+    ],
+    "placements": [
+      {
+        "artifact": 0,
+        "strategy": {
+          "SharedVolume": {
+            "path": "/vol"
+          }
+        }
+      }
+    ],
+    "actors": [
+      {
+        "name": "big",
+        "labels": [
+          "self-hosted"
+        ],
+        "capabilities": [
+          "mount"
+        ]
+      }
+    ],
+    "policies": {}
+  },
+  "event": {
+    "push": {
+      "branch": "main"
+    }
+  },
+  "assertions": [
+    {
+      "assert": "run_passed"
+    },
+    {
+      "assert": "transfer_used",
+      "artifact": "source",
+      "kind": "mount"
+    }
+  ]
+}

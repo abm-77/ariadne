@@ -1,0 +1,58 @@
+{
+  "workflow": {
+    "name": "effect-gating",
+    "artifacts": [
+      {
+        "name": "bin",
+        "ty": "Binary",
+        "producer": 0
+      }
+    ],
+    "actions": [
+      {
+        "name": "deploy",
+        "op": "deploy",
+        "outputs": [
+          0
+        ],
+        "effects": [
+          0
+        ],
+        "shell": {
+          "script": "echo deploying",
+          "capture": "NoCapture"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "name": "ship",
+        "kind": "Deployment",
+        "requires_approval": false
+      }
+    ],
+    "actors": [
+      {
+        "name": "local",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "policies": {}
+  },
+  "event": {
+    "pull_request": {
+      "fork": false
+    }
+  },
+  "assertions": [
+    {
+      "assert": "run_passed"
+    },
+    {
+      "assert": "effect_gated",
+      "effect": "ship"
+    }
+  ]
+}

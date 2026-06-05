@@ -1,0 +1,72 @@
+{
+  "name": "Simple Build and Test",
+  "artifacts": [
+    {
+      "name": "source",
+      "ty": "SourceTree",
+      "producer": 0
+    },
+    {
+      "name": "binary",
+      "ty": "Binary",
+      "producer": 1
+    },
+    {
+      "name": "test-report",
+      "ty": "TestReport",
+      "producer": 2
+    }
+  ],
+  "actions": [
+    {
+      "name": "checkout",
+      "op": "checkout",
+      "outputs": [
+        0
+      ],
+      "shell": {
+        "script": "git checkout .",
+        "capture": "NoCapture"
+      }
+    },
+    {
+      "name": "build",
+      "op": "build",
+      "inputs": [
+        0
+      ],
+      "outputs": [
+        1
+      ],
+      "shell": {
+        "script": "cargo build --release",
+        "capture": "NoCapture"
+      }
+    },
+    {
+      "name": "test",
+      "op": "test",
+      "inputs": [
+        1
+      ],
+      "outputs": [
+        2
+      ],
+      "shell": {
+        "script": "cargo test",
+        "capture": "NoCapture"
+      }
+    }
+  ],
+  "actors": [
+    {
+      "name": "github-ubuntu",
+      "labels": [
+        "ubuntu-latest"
+      ]
+    }
+  ],
+  "policies": {
+    "max_parallel_jobs": 2
+  }
+}

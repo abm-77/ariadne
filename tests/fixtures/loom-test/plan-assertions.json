@@ -1,0 +1,171 @@
+{
+  "workflow": {
+    "name": "plan-assertions",
+    "artifacts": [
+      {
+        "name": "src",
+        "ty": "SourceTree",
+        "producer": 0
+      },
+      {
+        "name": "bin",
+        "ty": "Binary",
+        "producer": 1,
+        "path": "target/release/app"
+      }
+    ],
+    "actions": [
+      {
+        "name": "checkout",
+        "op": "checkout",
+        "outputs": [
+          0
+        ],
+        "actor_constraints": [
+          {
+            "Specific": 0
+          }
+        ],
+        "shell": {
+          "script": "git checkout .",
+          "capture": "NoCapture"
+        }
+      },
+      {
+        "name": "build",
+        "op": "build",
+        "inputs": [
+          0
+        ],
+        "outputs": [
+          1
+        ],
+        "effects": [
+          0
+        ],
+        "secrets": [
+          "TOKEN"
+        ],
+        "actor_constraints": [
+          {
+            "Specific": 1
+          }
+        ],
+        "shell": {
+          "script": "make",
+          "capture": "NoCapture"
+        }
+      },
+      {
+        "name": "deploy",
+        "op": "deploy",
+        "inputs": [
+          1
+        ],
+        "effects": [
+          1
+        ],
+        "actor_constraints": [
+          {
+            "Specific": 0
+          }
+        ],
+        "shell": {
+          "script": "./deploy.sh",
+          "capture": "NoCapture"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "name": "release",
+        "kind": "PublishRelease",
+        "requires_approval": true
+      },
+      {
+        "name": "ship",
+        "kind": "Deployment",
+        "requires_approval": false
+      }
+    ],
+    "actors": [
+      {
+        "name": "runner",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      },
+      {
+        "name": "gpu-box",
+        "labels": [
+          "self-hosted"
+        ],
+        "capabilities": [
+          "gpu"
+        ]
+      }
+    ],
+    "policies": {
+      "max_parallel_jobs": 4
+    }
+  },
+  "event": {
+    "push": {
+      "branch": "main"
+    }
+  },
+  "assertions": [
+    {
+      "assert": "has_effect",
+      "effect": "release"
+    },
+    {
+      "assert": "effect_requires_approval",
+      "effect": "release"
+    },
+    {
+      "assert": "effect_gated",
+      "effect": "release"
+    },
+    {
+      "assert": "effect_fired",
+      "effect": "ship"
+    },
+    {
+      "assert": "max_concurrent_deployments",
+      "max": 1
+    },
+    {
+      "assert": "max_jobs_with_capability",
+      "capability": "gpu",
+      "max": 2
+    },
+    {
+      "assert": "max_parallel_jobs",
+      "max": 10
+    },
+    {
+      "assert": "selected_instruction",
+      "op": "CheckoutRepo",
+      "instruction": "local.checkout.git"
+    },
+    {
+      "assert": "transfer_used",
+      "artifact": "src",
+      "kind": "copy"
+    },
+    {
+      "assert": "artifact_path",
+      "artifact": "bin",
+      "path": "target/release/app"
+    },
+    {
+      "assert": "artifact_produced",
+      "artifact": "bin"
+    },
+    {
+      "assert": "secret_spoofed",
+      "secret": "TOKEN"
+    }
+  ]
+}

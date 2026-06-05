@@ -1,0 +1,66 @@
+{
+  "workflow": {
+    "name": "pass",
+    "artifacts": [
+      {
+        "name": "binary",
+        "ty": "Binary",
+        "producer": 0,
+        "path": "dist/app"
+      }
+    ],
+    "actions": [
+      {
+        "name": "build",
+        "op": "build",
+        "outputs": [
+          0
+        ],
+        "secrets": [
+          "TOKEN"
+        ],
+        "shell": {
+          "script": "echo building && echo done",
+          "capture": "NoCapture"
+        }
+      }
+    ],
+    "actors": [
+      {
+        "name": "local",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "policies": {}
+  },
+  "event": {
+    "push": {
+      "branch": "main"
+    }
+  },
+  "assertions": [
+    {
+      "assert": "run_passed"
+    },
+    {
+      "assert": "artifact_produced",
+      "artifact": "binary"
+    },
+    {
+      "assert": "artifact_path",
+      "artifact": "binary",
+      "path": "dist/app"
+    },
+    {
+      "assert": "secret_spoofed",
+      "secret": "TOKEN"
+    },
+    {
+      "assert": "stdout_contains",
+      "unit": "build",
+      "text": "building"
+    }
+  ]
+}

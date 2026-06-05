@@ -1,0 +1,71 @@
+{
+  "workflow": {
+    "name": "failure",
+    "artifacts": [
+      {
+        "name": "bin",
+        "ty": "Binary",
+        "producer": 0
+      },
+      {
+        "name": "rel",
+        "ty": "ReleaseBundle",
+        "producer": 1
+      }
+    ],
+    "actions": [
+      {
+        "name": "build",
+        "op": "build",
+        "outputs": [
+          0
+        ],
+        "shell": {
+          "script": "echo trying && exit 3",
+          "capture": "NoCapture"
+        }
+      },
+      {
+        "name": "publish",
+        "op": "publish",
+        "inputs": [
+          0
+        ],
+        "outputs": [
+          1
+        ],
+        "shell": {
+          "script": "echo publishing",
+          "capture": "NoCapture"
+        }
+      }
+    ],
+    "actors": [
+      {
+        "name": "local",
+        "labels": [
+          "ubuntu-latest"
+        ]
+      }
+    ],
+    "policies": {}
+  },
+  "event": {
+    "push": {
+      "branch": "main"
+    }
+  },
+  "assertions": [
+    {
+      "assert": "run_failed"
+    },
+    {
+      "assert": "unit_failed",
+      "unit": "build"
+    },
+    {
+      "assert": "unit_skipped",
+      "unit": "publish"
+    }
+  ]
+}
