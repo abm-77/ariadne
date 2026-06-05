@@ -187,6 +187,33 @@ mod tests {
     }
 
     #[test]
+    fn defaults_to_ubuntu_and_workspace() {
+        let backend = backend(vec![0, 0]);
+        backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        let specs = backend.runtime.specs.lock().unwrap();
+        let s = specs.first().unwrap();
+        assert_eq!(s.image, "ubuntu:24.04");
+        assert_eq!(s.workdir.as_deref(), Some("/workspace"));
+    }
+
+    #[test]
+    fn with_image_and_workdir_propagate_to_container_spec() {
+        let backend = LocalBackend::new(MockRuntime::with_exit_codes(vec![0, 0]))
+            .with_image("rust:1")
+            .with_workdir("/build");
+        let run = backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        assert!(run.unit("checkout").unwrap().passed());
+        let specs = backend.runtime.specs.lock().unwrap();
+        assert!(!specs.is_empty());
+        for s in specs.iter() {
+            assert_eq!(s.image, "rust:1");
+            assert_eq!(s.workdir.as_deref(), Some("/build"));
+            // the repo is mounted at the configured workdir
+            assert!(s.mounts.iter().any(|m| m.container == "/build"));
+        }
+    }
+
+    #[test]
     fn secrets_spoofed_into_env_on_push() {
         let backend = backend(vec![0, 0]);
         let run = backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();

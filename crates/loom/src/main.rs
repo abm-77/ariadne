@@ -41,6 +41,14 @@ enum Cmd {
         /// Test suite (cases + assertions). Defaults to `<file>.test.json`.
         #[arg(long)]
         tests: Option<PathBuf>,
+        /// Container image to run actions in (default ubuntu:24.04). Use one
+        /// with the tools your scripts need, e.g. rust:1 for git + cargo.
+        #[arg(long)]
+        image: Option<String>,
+        /// Directory the repo is mounted at inside the container (default
+        /// /workspace).
+        #[arg(long)]
+        workdir: Option<String>,
         file: PathBuf,
     },
     /// Why was this plan selected? Show planner, placement, and optimization
@@ -122,11 +130,14 @@ fn main() {
                 explain_selection(&plan, &b);
             }
         }
-        Cmd::Test { event, tests, file } => {
+        Cmd::Test { event, tests, image, workdir, file } => {
             let pipeline = validated_pipeline_or_exit(&file);
+            let mut backend = LocalBackend::podman();
+            if let Some(i) = image { backend = backend.with_image(i); }
+            if let Some(w) = workdir { backend = backend.with_workdir(w); }
             let suite_path = tests.unwrap_or_else(|| sidecar_suite(&file));
             if suite_path.exists() {
-                run_suite(&pipeline.workflow, &suite_path);
+                run_suite(&pipeline.workflow, &suite_path, &backend);
             } else {
                 use ariadne::testing::Executor;
                 let ctx = parse_event(&event);
@@ -134,7 +145,7 @@ fn main() {
                     Ok(plan) => { print_diags(&plan.diagnostics); plan }
                     Err(errs) => { print_diags(&errs); std::process::exit(1); }
                 };
-                match LocalBackend::podman().execute(&plan) {
+                match backend.execute(&plan) {
                     Ok(run) => {
                         print_test_run(&run);
                         if !run.passed() { std::process::exit(1); }
@@ -154,17 +165,19 @@ fn sidecar_suite(file: &std::path::Path) -> PathBuf {
     file.with_file_name(format!("{base}.test.json"))
 }
 
-fn run_suite(workflow: &ariadne::ir::Workflow, suite_path: &std::path::Path) {
-    use ariadne::backends::local::LocalBackend;
+fn run_suite<E: Backend + ariadne::testing::Executor>(
+    workflow: &ariadne::ir::Workflow,
+    suite_path: &std::path::Path,
+    backend: &E,
+) {
     use ariadne::testing::{run_case, TestSuite};
     let suite = TestSuite::load(suite_path)
         .unwrap_or_else(|e| { eprintln!("error: {e}"); std::process::exit(1); });
 
-    let backend = LocalBackend::podman();
     let mut failed = 0;
     println!("Test suite: {} case(s)", suite.cases.len());
     for case in &suite.cases {
-        match run_case(workflow, case, &backend) {
+        match run_case(workflow, case, backend) {
             Ok(report) => {
                 let fails: Vec<_> = report.failures().collect();
                 if fails.is_empty() {

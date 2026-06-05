@@ -28,6 +28,20 @@ impl<R: ContainerRuntime> LocalBackend<R> {
     pub fn new(runtime: R) -> Self {
         Self { runtime, opts: LocalOptions::default(), catalogue: instructions::catalogue() }
     }
+
+    /// Container image actions run in (default `ubuntu:24.04`). Use one that
+    /// ships the tools your scripts need, e.g. `rust:1` for git + cargo.
+    pub fn with_image(mut self, image: impl Into<String>) -> Self {
+        self.opts.default_image = image.into();
+        self
+    }
+
+    /// Working directory the host repo is mounted at inside the container
+    /// (default `/workspace`).
+    pub fn with_workdir(mut self, workdir: impl Into<String>) -> Self {
+        self.opts.workdir = workdir.into();
+        self
+    }
 }
 
 impl LocalBackend<PodmanRuntime> {
