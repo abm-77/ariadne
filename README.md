@@ -1,4 +1,4 @@
-# Ariadne & Loom
+# Ariadne
 
 **CI/CD is a planning problem, not a YAML authoring problem.**
 
@@ -95,23 +95,23 @@ cargo test --workspace         # or: cargo t  (alias)
 Workflows are consumed as Thread IR - either `.json` (serde) or `.pb` (protobuf
 binary). An example lives at `tests/fixtures/simple-build-test.tir.json`.
 
-```sh
-loom=target/release/loom
-fixture=tests/fixtures/simple-build-test.tir.json
+These examples use `loom` (the release binary lives at `target/release/loom`)
+and the bundled example workflow.
 
+```sh
 # Is this workflow valid?
-$loom check $fixture
+loom check tests/fixtures/simple-build-test.tir.json
 
 # What plan should be produced? Emit GitHub Actions YAML.
-$loom plan $fixture github
+loom plan tests/fixtures/simple-build-test.tir.json github
 
 # Why this plan? Show planner + optimization decisions (and instruction
 # selection if you name a backend).
-$loom explain $fixture github
+loom explain tests/fixtures/simple-build-test.tir.json github
 
 # Does it behave correctly? Run the workflow's test suite, or execute once
 # in Podman if no suite is configured.
-$loom test $fixture
+loom test tests/fixtures/simple-build-test.tir.json
 ```
 
 ### Optimization levels
@@ -128,7 +128,7 @@ $loom test $fixture
 Feed a profile to guide cost-based decisions:
 
 ```sh
-$loom plan $fixture local -O3 --profile profile.json
+loom plan tests/fixtures/simple-build-test.tir.json local -O3 --profile profile.json
 ```
 
 ### Checking in generated CI
@@ -137,6 +137,6 @@ $loom plan $fixture local -O3 --profile profile.json
 version control and fail CI when it drifts:
 
 ```sh
-$loom plan $fixture github --out .github/workflows/ci.yml
+loom plan tests/fixtures/simple-build-test.tir.json github --out .github/workflows/ci.yml
 git diff --exit-code .github/workflows/ci.yml
 ```
