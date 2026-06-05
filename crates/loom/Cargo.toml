@@ -1,0 +1,12 @@
+[package]
+name = "loom"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "loom"
+path = "src/main.rs"
+
+[dependencies]
+ariadne = { workspace = true }
+clap    = { workspace = true }
