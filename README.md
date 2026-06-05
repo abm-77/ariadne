@@ -17,8 +17,8 @@ and the engine.
 ## Why
 
 Existing CI systems make you hand-author execution mechanics: jobs, `needs`,
-matrices, artifact upload/download steps, caches, runner labels. That's a plan
-written by hand - tedious to get right and easy to get subtly wrong.
+matrices, artifact upload/download steps, caches, runner labels. This is 
+tedious to get right and easy to get subtly wrong.
 
 Ariadne lets you state workflow *semantics* and derives the execution plan:
 
@@ -30,14 +30,13 @@ Ariadne lets you state workflow *semantics* and derives the execution plan:
 
 The guarantee at the center of the design: **Ariadne always produces a correct
 plan if one exists.** Optimization is optional and never required for
-correctness - the baseline plan uses plain copy/upload/download semantics, and
+correctness. The baseline plan uses plain copy/upload/download semantics, and
 richer strategies (mounts, colocation, fusion) are layered on top only when they
 are provably safe.
 
 ## Core concepts
 
-Thread IR has five first-class semantic entities - deliberately *not* collapsed
-into generic "jobs" and "steps":
+Thread IR has five first-class semantic entities:
 
 | Entity | What it is |
 |--------|------------|
@@ -71,7 +70,7 @@ ir → diagnostics → validate → analysis → planner → optimize → backen
    local Podman backend used for testing CI itself).
 
 Profiles (observed durations, sizes, costs, utilization) influence cost
-estimates only - **never** semantics.
+estimates only, **never** semantics.
 
 See **[DESIGN.md](DESIGN.md)** for the full specification.
 
@@ -90,7 +89,7 @@ cargo test --workspace         # or: cargo t  (alias)
 
 ## Quickstart
 
-Workflows are consumed as Thread IR - either `.json` (serde) or `.pb` (protobuf
+Workflows are consumed as Thread IR: either `.json` (serde) or `.pb` (protobuf
 binary). An example lives at `tests/fixtures/simple-build-test.tir.json`.
 
 These examples use `loom` (the release binary lives at `target/release/loom`)

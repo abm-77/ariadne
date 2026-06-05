@@ -200,6 +200,7 @@ Use these names consistently.
 
 
 ## Code Style 
-- Do NOT use section header comments like // ---- TITLE ----, or any variation of 
+- Do not use section header comments like // ---- TITLE ----, or any variation of 
 - Keep comments to at most 4 lines, if you can't explain it in that, you're being too verbose.
 - Do not use file-level comments explaining what a file does.
+- Do not, under any circumstance, use an em-dash.
