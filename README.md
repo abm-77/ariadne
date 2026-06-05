@@ -1,7 +1,5 @@
 # Ariadne
 
-**CI/CD is a planning problem, not a YAML authoring problem.**
-
 Ariadne is a CI/CD workflow **planning compiler**. You describe *what* your
 pipeline is made of - artifacts, actions, effects, constraints, policies - and
 Ariadne figures out *how* to run it: it validates the workflow, builds a correct
