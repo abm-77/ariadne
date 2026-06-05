@@ -1,0 +1,172 @@
+mod exec;
+mod instructions;
+pub mod runtime;
+
+use crate::backends::{Backend, BackendKind, Capability, Catalogue, Instruction, Renderer};
+use crate::planner::{PhysicalOp, Plan};
+pub use crate::backends::renderers::{BashRenderer, BashScript, BashUnit};
+pub use runtime::{ContainerRuntime, ContainerSpec, DockerRuntime, Mount, PodmanRuntime, RunResult, RuntimeError};
+
+pub struct LocalOptions {
+    pub default_image: String,
+    pub workdir: String,
+}
+
+impl Default for LocalOptions {
+    fn default() -> Self {
+        Self { default_image: "ubuntu:24.04".into(), workdir: "/workspace".into() }
+    }
+}
+
+pub struct LocalBackend<R: ContainerRuntime> {
+    pub runtime: R,
+    pub opts: LocalOptions,
+    catalogue: Catalogue,
+}
+
+impl<R: ContainerRuntime> LocalBackend<R> {
+    pub fn new(runtime: R) -> Self {
+        Self { runtime, opts: LocalOptions::default(), catalogue: instructions::catalogue() }
+    }
+}
+
+impl LocalBackend<PodmanRuntime> {
+    pub fn podman() -> Self { Self::new(PodmanRuntime::default()) }
+}
+
+impl LocalBackend<DockerRuntime> {
+    pub fn docker() -> Self { Self::new(DockerRuntime::default()) }
+}
+
+impl<R: ContainerRuntime> Backend for LocalBackend<R> {
+    type Ir = BashScript;
+    type Options = LocalOptions;
+
+    fn name(&self) -> &str { "local" }
+    fn backend_kind(&self) -> BackendKind { BackendKind::Local }
+    fn capabilities(&self) -> Vec<Capability> { instructions::capabilities() }
+    fn catalogue(&self) -> &Catalogue { &self.catalogue }
+    fn options(&self) -> &LocalOptions { &self.opts }
+
+    fn capability_profile(&self) -> crate::backends::BackendCapabilities {
+        // Local containers share a workspace/volume, so mounts + colocation are
+        // available; no GitHub-style artifact cache.
+        use crate::backends::BackendCapabilities as C;
+        C::MOUNTS | C::COLOCATION
+    }
+
+    fn lower(&self, plan: &Plan) -> BashScript {
+        let selector = self.selector();
+        let caps = self.capabilities();
+        let units = plan.units.iter().map(|unit| {
+            let lines: Vec<String> = unit.ops.iter()
+                .flat_map(|op| {
+                    selector.select(op, &caps, &[])
+                        .map(|sel| lower_op(op, sel.instruction))
+                        .unwrap_or_default()
+                })
+                .collect();
+            BashUnit { label: unit.action_name.to_string(), lines }
+        }).collect();
+        BashScript { units }
+    }
+
+    fn render(&self, ir: &BashScript) -> String {
+        BashRenderer.render(ir)
+    }
+}
+
+pub(crate) fn lower_op(op: &PhysicalOp, instr: &Instruction) -> Vec<String> {
+    let kind = instr.implementation.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    match kind {
+        "process.exec" => match op {
+            PhysicalOp::RunShell { script, .. } => vec![script.clone()],
+            PhysicalOp::CheckoutRepo => {
+                let argv: Vec<&str> = instr.implementation.get("argv")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                if argv.is_empty() { vec![] } else { vec![argv.join(" ")] }
+            }
+            _ => vec![],
+        },
+        "local.copy" => match op {
+            // Archive the artifact into the mock store by its path. If the path
+            // is absent (build didn't produce it), drop a placeholder so the
+            // transfer is still observable. Writes only to the store, never the
+            // workspace.
+            PhysicalOp::UploadArtifact { name, path: Some(p) } => vec![format!(
+                "mkdir -p \"$LOOM_ARTIFACT_STORE/{name}\"; \
+                 cp -r \"{p}\" \"$LOOM_ARTIFACT_STORE/{name}/\" 2>/dev/null \
+                 || echo \"mock:{name}\" > \"$LOOM_ARTIFACT_STORE/{name}/.mock\""
+            )],
+            _ => vec![],
+        },
+        "local.noop" => vec![],
+        _ => vec![],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backends::Selector;
+    use crate::ir::{ArtifactType, WorkflowBuilder};
+
+    fn simple_plan() -> Plan {
+        let mut b = WorkflowBuilder::new("test");
+        let src = b.artifact("source", ArtifactType::SourceTree);
+        let bin = b.artifact("binary", ArtifactType::Binary);
+        b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
+        b.shell_action("build", "build", &[src], &[bin], "cargo build --release");
+        b.actor("local", &["ubuntu-latest"], &[]);
+        crate::planner::plan(&b.build()).expect("plan failed")
+    }
+
+    #[test]
+    fn emit_produces_bash_script() {
+        let script = LocalBackend::podman().emit(&simple_plan()).unwrap();
+        assert!(script.starts_with("#!/usr/bin/env bash"));
+        assert!(script.contains("git checkout ."));
+        assert!(script.contains("cargo build --release"));
+    }
+
+    #[test]
+    fn emit_preserves_topological_order() {
+        let script = LocalBackend::podman().emit(&simple_plan()).unwrap();
+        let checkout_pos = script.find("git checkout .").unwrap();
+        let build_pos = script.find("cargo build --release").unwrap();
+        assert!(checkout_pos < build_pos);
+    }
+
+    #[test]
+    fn backend_name_is_local() {
+        assert_eq!(LocalBackend::podman().name(), "local");
+    }
+
+    #[test]
+    fn catalogue_selects_correct_instructions() {
+        let backend = LocalBackend::podman();
+        let sel = Selector::for_backend(&backend);
+        let caps = instructions::capabilities();
+        assert!(sel.select(&PhysicalOp::CheckoutRepo, &caps, &[]).is_some());
+        let run = PhysicalOp::RunShell { label: "x".into(), script: "echo hi".into(), env: Default::default() };
+        assert!(sel.select(&run, &caps, &[]).is_some());
+    }
+
+    #[test]
+    fn backend_trait_reports_kind_and_capabilities() {
+        let backend = LocalBackend::podman();
+        assert_eq!(backend.backend_kind(), BackendKind::Local);
+        assert!(backend.capabilities().contains(&Capability::new("process.exec")));
+    }
+
+    #[test]
+    fn bash_renderer_formats_header_and_sections() {
+        let script = BashScript {
+            units: vec![BashUnit { label: "build".into(), lines: vec!["cargo build".into()] }],
+        };
+        let out = BashRenderer.render(&script);
+        assert!(out.contains("# build\ncargo build"));
+    }
+}
