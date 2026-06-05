@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/loom"]
+members = [".", "crates/loom", "crates/ariadne-py"]
 resolver = "2"
 
 [workspace.package]

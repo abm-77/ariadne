@@ -1,0 +1,13 @@
+[package]
+name = "ariadne-py"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ariadne_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+ariadne    = { workspace = true }
+pyo3       = { version = "0.22", features = ["extension-module", "abi3-py311"] }
+serde_json = { workspace = true }
