@@ -5,9 +5,14 @@ actors, external artifacts, placements, and policies.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ._graph import current_graph
 from ._handle import ArtifactHandle, ActorHandle
 from ._types import _type_to_tir
+
+if TYPE_CHECKING:
+    from ._graph import WorkflowGraph
 
 
 def artifact(name: str, ty: type) -> ArtifactHandle:
@@ -60,3 +65,51 @@ class Placement:
     @staticmethod
     def oci_registry(registry: str, tag: str) -> dict:
         return {"OciRegistry": {"registry": registry, "tag": tag}}
+
+
+class Pipeline:
+    """Ariadne planning pipeline.
+
+    Wraps ariadne_core.Pipeline to operate directly on WorkflowGraph objects.
+
+    Usage:
+        graph = my_workflow()
+        p = Pipeline(graph)
+        print(p.validate())
+        yaml = p.compile(backend="github", level=2)
+    """
+
+    def __init__(self, graph: "WorkflowGraph"):
+        try:
+            from ariadne_core import Pipeline as _Pipeline
+        except ImportError as e:
+            raise ImportError(
+                "ariadne_core extension not found. "
+                "Install with: maturin develop --manifest-path crates/ariadne-py/Cargo.toml"
+            ) from e
+        self._inner = _Pipeline(graph.emit_json())
+        self._graph = graph
+
+    def validate(self) -> list[str]:
+        """Validate the workflow. Returns diagnostic strings."""
+        return self._inner.validate()
+
+    def has_errors(self) -> bool:
+        """True if the workflow has validation errors."""
+        return self._inner.has_errors()
+
+    def plan(self):
+        """Compute a baseline execution plan."""
+        return self._inner.plan()
+
+    def optimize(self, plan, backend: str = "local", level: int = 2):
+        """Optimize a plan for the given backend and optimization level (0-3)."""
+        return self._inner.optimize(plan, backend=backend, level=level)
+
+    def emit(self, plan, backend: str = "local") -> str:
+        """Emit backend-specific configuration from a plan."""
+        return self._inner.emit(plan, backend=backend)
+
+    def compile(self, backend: str = "local", level: int = 2) -> str:
+        """Validate + plan + optimize + emit in one call."""
+        return self._inner.compile(backend=backend, level=level)

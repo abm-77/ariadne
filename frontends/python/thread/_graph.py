@@ -25,6 +25,7 @@ class WorkflowGraph:
         self._placements: list[dict[str, Any]] = []
         self._actors: list[dict[str, Any]] = []
         self._policies: dict[str, Any] = {}
+        self._op_definitions: list[dict[str, Any]] = []
         self._token = None
 
     def __enter__(self) -> WorkflowGraph:

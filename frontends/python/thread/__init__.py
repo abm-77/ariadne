@@ -21,7 +21,7 @@ from ._graph import WorkflowGraph
 from ._decorators import op, workflow
 from ._impl import container, shell, backend_instruction, implementations
 from ._emit import emit_json
-from ._api import artifact, actor, place, max_parallel_jobs, Placement
+from ._api import artifact, actor, place, max_parallel_jobs, Placement, Pipeline
 
 __all__ = [
     # graph lifecycle
@@ -41,4 +41,6 @@ __all__ = [
     "ArtifactHandle", "ActorHandle", "Outputs",
     # serialization
     "emit_json",
+    # in-process planning pipeline
+    "Pipeline",
 ]

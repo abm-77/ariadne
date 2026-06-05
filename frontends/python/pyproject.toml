@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
 [project]
 name = "thread"
@@ -12,8 +12,12 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["thread"]
+[tool.maturin]
+# Build the ariadne-py Rust extension as part of this package.
+manifest-path = "../../crates/ariadne-py/Cargo.toml"
+module-name = "thread.ariadne_core"
+python-source = "."
+features = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

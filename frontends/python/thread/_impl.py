@@ -7,6 +7,8 @@ from __future__ import annotations
 
 
 class ContainerImpl:
+    _kind = "container"
+
     def __init__(self, image: str, run: str, env: dict | None = None):
         self.image = image
         self.run = run
@@ -20,6 +22,8 @@ class ContainerImpl:
 
 
 class ShellImpl:
+    _kind = "shell"
+
     def __init__(self, run: str, env: dict | None = None, capture: str = "NoCapture"):
         self.run = run
         self.env = env or {}
@@ -34,6 +38,7 @@ class ShellImpl:
 
 class BackendInstructionImpl:
     """Opaque implementation backed by a backend-specific step (e.g. github.uses)."""
+    _kind = "github_action"
 
     def __init__(self, kind: str, ref: str | None = None, with_: dict | None = None):
         self.kind = kind

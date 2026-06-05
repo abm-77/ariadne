@@ -6,13 +6,26 @@ from typing import Any
 
 from ._graph import WorkflowGraph, _current, current_graph
 from ._handle import ArtifactHandle, Outputs
-from ._types import Effect, EffectKind, _type_to_tir
+from ._types import Effect, EffectKind, _type_to_tir, _Sentinel
 
 
 def _impl_shell(impl: Any) -> dict | None:
     if impl is not None and hasattr(impl, "to_shell"):
         return impl.to_shell()
     return None
+
+
+def _is_artifact_param(param: inspect.Parameter) -> bool:
+    ann = param.annotation
+    return isinstance(ann, type) and isinstance(ann, _Sentinel)
+
+
+def _param_ty(param: inspect.Parameter) -> str:
+    ann = param.annotation
+    if isinstance(ann, type) and isinstance(ann, _Sentinel):
+        tir = ann._tir
+        return tir if isinstance(tir, str) else str(tir)
+    return "scalar"
 
 
 class Op:
@@ -37,6 +50,43 @@ class Op:
         self.opaque = opaque
         functools.update_wrapper(self, fn)
 
+    def _register_op_def(self, graph: Any, impl: Any) -> None:
+        """Register this op's OpDefinition in the graph (idempotent by op id)."""
+        if any(d["id"] == self.name for d in graph._op_definitions):
+            return
+
+        inputs = [
+            {"name": str(p.name), "ty": _param_ty(p), "kind": "artifact"}
+            for p in self.sig.parameters.values()
+            if _is_artifact_param(p)
+        ]
+        inputs += [
+            {"name": str(p.name), "ty": "scalar", "kind": "scalar"}
+            for p in self.sig.parameters.values()
+            if not _is_artifact_param(p)
+        ]
+        outputs = [
+            {"name": k, "ty": _type_to_tir(v) if isinstance(_type_to_tir(v), str) else str(v.__name__), "kind": "artifact"}
+            for k, v in self.outputs.items()
+        ]
+
+        impls = []
+        if impl is not None and hasattr(impl, "to_shell"):
+            s = impl.to_shell()
+            kind = getattr(impl, "_kind", "shell")
+            entry: dict = {"kind": kind, "run": s.get("script", ""), "capture": s.get("capture", "NoCapture")}
+            if s.get("env"):
+                entry["env"] = s["env"]
+            impls.append(entry)
+
+        graph._op_definitions.append({
+            "id": self.name,
+            "inputs": inputs,
+            "outputs": outputs,
+            "effects": [e.kind.value if hasattr(e, "kind") else e.value for e in self.effects],
+            "implementations": impls,
+        })
+
     def __call__(self, *args: Any, **kwargs: Any) -> ArtifactHandle | Outputs | None:
         graph = current_graph()
 
@@ -54,6 +104,8 @@ class Op:
         # Evaluate the body to get implementation metadata.
         impl = self.fn(*args, **kwargs)
         shell = _impl_shell(impl)
+
+        self._register_op_def(graph, impl)
 
         # Artifact inputs = bound arguments that are ArtifactHandle instances.
         artifact_inputs = [

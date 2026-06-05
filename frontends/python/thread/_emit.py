@@ -45,5 +45,22 @@ def emit_json(graph: WorkflowGraph, indent: int = 2) -> str:
         doc["actors"] = list(graph._actors)
     if graph._policies:
         doc["policies"] = dict(graph._policies)
+    if graph._op_definitions:
+        doc["op_definitions"] = [_clean_op_def(d) for d in graph._op_definitions]
 
     return json.dumps(doc, indent=indent)
+
+
+def _clean_op_def(d: dict) -> dict:
+    out: dict = {"id": d["id"]}
+    if d.get("inputs"):
+        out["inputs"] = d["inputs"]
+    if d.get("outputs"):
+        out["outputs"] = d["outputs"]
+    if d.get("effects"):
+        out["effects"] = d["effects"]
+    if d.get("implementations"):
+        out["implementations"] = d["implementations"]
+    if d.get("metadata"):
+        out["metadata"] = d["metadata"]
+    return out
