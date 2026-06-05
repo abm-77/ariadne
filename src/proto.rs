@@ -289,6 +289,7 @@ pub fn from_wire(m: &wire::Workflow) -> ir::Workflow {
                 if objs.is_empty() { ir::default_objectives() } else { objs }
             },
         },
+        op_definitions: vec![],
     }
 }
 

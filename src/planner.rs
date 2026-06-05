@@ -232,16 +232,23 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
             ops.push(PhysicalOp::DownloadArtifact { name: art.name, path: art.path.clone() });
         }
 
-        match action.op.as_str() {
-            "checkout" => ops.push(PhysicalOp::CheckoutRepo),
-            _ => {
-                if let Some(ref sh) = action.shell {
-                    ops.push(PhysicalOp::RunShell {
-                        label: action.name,
-                        script: sh.script.clone(),
-                        env: sh.env.clone(),
-                    });
-                }
+        let op_def = workflow.find_op(action.op.as_str());
+        let is_checkout = action.op.as_str() == "checkout"
+            || op_def.is_some_and(|d| d.implementations.iter().any(|i| i.is_checkout()));
+
+        if is_checkout {
+            ops.push(PhysicalOp::CheckoutRepo);
+        } else {
+            // Prefer the action's own shell script; fall back to the op
+            // definition's first shell-capable implementation.
+            let impl_shell = op_def.and_then(|d| d.implementations.iter().find_map(|i| i.to_shell()));
+            let effective = action.shell.as_ref().or(impl_shell.as_ref());
+            if let Some(sh) = effective {
+                ops.push(PhysicalOp::RunShell {
+                    label: action.name,
+                    script: sh.script.clone(),
+                    env: sh.env.clone(),
+                });
             }
         }
 

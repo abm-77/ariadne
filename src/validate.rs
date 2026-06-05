@@ -115,7 +115,88 @@ pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
         diags.push(Diagnostic::error(DiagCode::CycleDetected, msg));
     }
 
+    // Op call validation: when an action's op has a definition, check that its
+    // input/output artifact types match the declared ports.
+    validate_op_calls(workflow, &mut diags);
+
     diags
+}
+
+fn validate_op_calls(workflow: &Workflow, diags: &mut Vec<Diagnostic>) {
+    use crate::ir::PortKind;
+
+    for action in &workflow.actions {
+        let Some(def) = workflow.find_op(action.op.as_str()) else { continue };
+
+        let art_inputs: Vec<_> = def.inputs.iter().filter(|p| p.kind == PortKind::Artifact).collect();
+        let art_outputs: Vec<_> = def.outputs.iter().filter(|p| p.kind == PortKind::Artifact).collect();
+
+        if action.inputs.len() != art_inputs.len() {
+            diags.push(Diagnostic::error(
+                DiagCode::OpPortMismatch,
+                format!(
+                    "Action '{}' calls op '{}' with {} artifact input(s) but op declares {}",
+                    action.name, def.id, action.inputs.len(), art_inputs.len()
+                ),
+            ));
+        }
+
+        if action.outputs.len() != art_outputs.len() {
+            diags.push(Diagnostic::error(
+                DiagCode::OpPortMismatch,
+                format!(
+                    "Action '{}' calls op '{}' with {} artifact output(s) but op declares {}",
+                    action.name, def.id, action.outputs.len(), art_outputs.len()
+                ),
+            ));
+        }
+
+        // Type-check inputs positionally.
+        for (port, &art_id) in art_inputs.iter().zip(action.inputs.iter()) {
+            let artifact = workflow.artifact(art_id);
+            let actual = artifact_type_str(&artifact.ty);
+            if actual != port.ty {
+                diags.push(Diagnostic::error(
+                    DiagCode::TypeMismatch,
+                    format!(
+                        "Action '{}' passes artifact '{}' (type {}) to port '{}' of op '{}' which expects {}",
+                        action.name, artifact.name, actual, port.name, def.id, port.ty
+                    ),
+                ));
+            }
+        }
+
+        // Type-check outputs positionally.
+        for (port, &art_id) in art_outputs.iter().zip(action.outputs.iter()) {
+            let artifact = workflow.artifact(art_id);
+            let actual = artifact_type_str(&artifact.ty);
+            if actual != port.ty {
+                diags.push(Diagnostic::error(
+                    DiagCode::TypeMismatch,
+                    format!(
+                        "Action '{}' produces artifact '{}' (type {}) for port '{}' of op '{}' which declares {}",
+                        action.name, artifact.name, actual, port.name, def.id, port.ty
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn artifact_type_str(ty: &crate::ir::ArtifactType) -> String {
+    use crate::ir::ArtifactType;
+    match ty {
+        ArtifactType::SourceTree => "SourceTree".into(),
+        ArtifactType::Wheel => "Wheel".into(),
+        ArtifactType::Binary => "Binary".into(),
+        ArtifactType::ContainerImage => "ContainerImage".into(),
+        ArtifactType::Sbom => "Sbom".into(),
+        ArtifactType::Signature => "Signature".into(),
+        ArtifactType::ReleaseBundle => "ReleaseBundle".into(),
+        ArtifactType::TestReport => "TestReport".into(),
+        ArtifactType::Model => "Model".into(),
+        ArtifactType::Custom(s) => s.clone(),
+    }
 }
 
 fn detect_cycle(workflow: &Workflow) -> Option<String> {

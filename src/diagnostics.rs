@@ -19,6 +19,8 @@ pub enum DiagCode {
     BackendCapabilityUnavailable,
     FallbackPlacementSelected,
     IndexOutOfBounds,
+    UnknownOp,
+    OpPortMismatch,
 }
 
 impl std::fmt::Display for DiagCode {
@@ -34,6 +36,8 @@ impl std::fmt::Display for DiagCode {
             Self::BackendCapabilityUnavailable => "BackendCapabilityUnavailable",
             Self::FallbackPlacementSelected => "FallbackPlacementSelected",
             Self::IndexOutOfBounds => "IndexOutOfBounds",
+            Self::UnknownOp => "UnknownOp",
+            Self::OpPortMismatch => "OpPortMismatch",
         };
         write!(f, "{s}")
     }
