@@ -83,12 +83,28 @@ impl Pass for SiblingFusionPass {
 fn fusible(plan: &Plan, ctx: &OptimizeCtx, i: usize, j: usize) -> bool {
     let (a, b) = (&plan.units[i], &plan.units[j]);
     a.runner == b.runner
+        && shares_toolchain(a, b)
         && ctx.analysis.is_pure(a.action_id)
         && ctx.analysis.is_pure(b.action_id)
         && !ctx.analysis.is_barrier(a.action_id)
         && !ctx.analysis.is_barrier(b.action_id)
         && !depends_on(plan, a.id, b.id)
         && !depends_on(plan, b.id, a.id)
+}
+
+/// Heuristic: only pack units with the *same* build environment — identical
+/// toolchain sets (both Rust, both Python, or both bare). Requiring equality
+/// (not mere overlap) keeps a mixed-toolchain unit, e.g. one that builds a Rust
+/// cdylib and packages a Python wheel, from snowballing every job onto one
+/// runner; packing groups cleanly by language.
+fn shares_toolchain(a: &crate::planner::ExecutionUnit, b: &crate::planner::ExecutionUnit) -> bool {
+    let norm = |u: &crate::planner::ExecutionUnit| {
+        let mut t: Vec<String> = u.toolchains.iter().map(|t| t.to_string()).collect();
+        t.sort();
+        t.dedup();
+        t
+    };
+    norm(a) == norm(b)
 }
 
 /// Does `x` transitively need `y` (a path x -> ... -> y along `needs`)?
@@ -143,7 +159,7 @@ fn merged(plan: &Plan, i: usize, j: usize) -> Plan {
             host.toolchains.push(t);
         }
     }
-    host.action_name = Ustr::from(&format!("{}+{}", host.action_name, donor.action_name));
+    host.action_name = Ustr::from(&format!("{}-and-{}", host.action_name, donor.action_name));
 
     let donor_id = donor.id;
     for u in &mut out.units {
@@ -221,7 +237,9 @@ mod tests {
         // setup overhead, so the three siblings collapse onto one job.
         let objs = vec![Objective::DollarCost, Objective::CriticalPath];
         let plan = run_with(&fan_out(3), objs, &priced(), OptLevel::O3);
-        assert_eq!(plan.units.len(), 2, "checkout + one packed job");
+        // The three siblings pack; the second vertical pass then folds the sole
+        // producer (checkout) into them, leaving a single job.
+        assert_eq!(plan.units.len(), 1, "everything collapses onto one job");
         assert!(
             plan.optimizations
                 .iter()

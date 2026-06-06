@@ -58,6 +58,11 @@ impl Pass for FusionPass {
                     producer.action_name, consumer.runner
                 ),
             });
+            // Producer runs first, so name the fused unit producer-then-consumer.
+            consumer.action_name = Ustr::from(&format!(
+                "{}-and-{}",
+                producer.action_name, consumer.action_name
+            ));
             plan.units.remove(p_idx);
         }
         decisions
@@ -211,7 +216,7 @@ mod tests {
         let plan = run(&chain_wf(), OptLevel::O3);
         assert_eq!(plan.units.len(), 1, "prep should be fused into build");
         let unit = &plan.units[0];
-        assert_eq!(unit.action_name.as_str(), "build");
+        assert_eq!(unit.action_name.as_str(), "prep-and-build");
         assert!(
             unit.ops.iter().any(
                 |op| matches!(op, LogicalOp::RunShell { script, .. } if script == "echo prep")
@@ -243,7 +248,7 @@ mod tests {
         let fused = plan
             .units
             .iter()
-            .find(|u| u.action_name.as_str() == "build")
+            .find(|u| u.action_name.as_str().contains("build"))
             .unwrap();
         let src_downloads = fused.ops.iter()
             .filter(|op| matches!(op, LogicalOp::DownloadArtifact { name, .. } if name.as_str() == "src"))

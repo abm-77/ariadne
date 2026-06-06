@@ -75,6 +75,9 @@ fn passes() -> Vec<Box<dyn Pass>> {
         Box::new(dedup::DeduplicationPass),
         Box::new(fusion::FusionPass),
         Box::new(sibling_fusion::SiblingFusionPass),
+        // A second vertical pass cleans up chains sibling fusion newly exposed
+        // (e.g. an install step that became its packed consumers' sole producer).
+        Box::new(fusion::FusionPass),
     ]
 }
 
