@@ -10,7 +10,16 @@ a 1-day retention for now.
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "frontends", "python"))
+# Prefer an installed `ariadne` (CI installs the built wheel); fall back to the
+# in-repo source tree for local dev. Inserting the source path unconditionally
+# would shadow the installed wheel with a checkout that has no compiled
+# extension (ariadne_core.abi3.so is gitignored), breaking `python ci/main.py`.
+try:
+    import ariadne  # noqa: F401
+except ImportError:
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), "..", "frontends", "python")
+    )
 
 from ariadne import (
     action,
@@ -53,6 +62,15 @@ def write_workflow(
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         f.write(yaml)
+    print(f"wrote {out}")
+
+
+def write_tir(pipeline, filename: str) -> None:
+    """Write the workflow's TIR JSON under ci/ so the `loom` CLI can validate it
+    (`loom check`/`loom explain`) in the correctness gate without a Python build."""
+    out = os.path.join(os.path.dirname(__file__), filename)
+    with open(out, "w") as f:
+        f.write(pipeline.to_tir_json())
     print(f"wrote {out}")
 
 

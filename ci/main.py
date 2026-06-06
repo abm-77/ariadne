@@ -33,15 +33,11 @@ from ariadne.testing import test_case, expect
 
 PROFILE_PATH = os.path.join(os.path.dirname(__file__), "profile.json")
 
-# Runner pricing so the cost model values fewer jobs; lets sibling fusion auto-
-# group same-toolchain work. Real timings arrive via the committed profile.json.
-PRICING = {"runner_costs": {"ubuntu-latest": 0.008 / 60}}
-
 
 def load_profile():
     """The committed profile from the last collection merged over runner pricing,
     so the cost model always has costs to reason about."""
-    profile = dict(PRICING)
+    profile = dict()
     if os.path.exists(PROFILE_PATH):
         with open(PROFILE_PATH) as f:
             profile.update(json.load(f))
@@ -115,6 +111,7 @@ def main():
         sys.exit(1)
 
     _lib.write_workflow(pipeline, "main.yml", level=3, profile=profile)
+    _lib.write_tir(pipeline, "main.tir.json")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,775 @@
+{
+  "name": "main_ci",
+  "artifacts": [
+    {
+      "name": "checkout-src",
+      "ty": "SourceTree",
+      "producer": 0
+    },
+    {
+      "name": "build_loom-loom",
+      "ty": "Binary",
+      "producer": 3,
+      "path": "target/release/loom",
+      "lifetime": "1h"
+    },
+    {
+      "name": "test_workspace-report",
+      "ty": "TestReport",
+      "producer": 4,
+      "path": "test-results.xml",
+      "lifetime": "1h"
+    },
+    {
+      "name": "rust_docs-docs",
+      "ty": "DocsSite",
+      "producer": 5,
+      "path": "target/doc",
+      "lifetime": "1h"
+    },
+    {
+      "name": "rust_coverage-coverage",
+      "ty": "CoverageData",
+      "producer": 6,
+      "path": "lcov.info",
+      "lifetime": "1h"
+    },
+    {
+      "name": "build_wheel-wheel",
+      "ty": "Wheel",
+      "producer": 7,
+      "path": "dist/*.whl",
+      "lifetime": "1h"
+    },
+    {
+      "name": "install_wheel-env",
+      "ty": "Wheel",
+      "producer": 8
+    },
+    {
+      "name": "test_wheel-report",
+      "ty": "TestReport",
+      "producer": 9,
+      "path": "py-test-results.xml",
+      "lifetime": "1h"
+    },
+    {
+      "name": "python_docs-docs",
+      "ty": "DocsSite",
+      "producer": 10,
+      "path": "frontends/python/docs",
+      "lifetime": "1h"
+    },
+    {
+      "name": "python_coverage-coverage",
+      "ty": "CoverageData",
+      "producer": 11,
+      "path": "py-coverage.xml",
+      "lifetime": "1h"
+    },
+    {
+      "name": "refresh_profile-profile",
+      "ty": "ProfileData",
+      "producer": 12,
+      "path": "ci/profile.json",
+      "lifetime": "1h"
+    }
+  ],
+  "action_calls": [
+    {
+      "name": "checkout",
+      "action": "checkout",
+      "outputs": [
+        0
+      ]
+    },
+    {
+      "name": "rust_fmt",
+      "action": "rust_fmt",
+      "inputs": [
+        0
+      ]
+    },
+    {
+      "name": "python_fmt",
+      "action": "python_fmt",
+      "inputs": [
+        0
+      ]
+    },
+    {
+      "name": "build_loom",
+      "action": "build_loom",
+      "inputs": [
+        0
+      ],
+      "outputs": [
+        1
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "test_workspace",
+      "action": "test_workspace",
+      "inputs": [
+        0,
+        1
+      ],
+      "outputs": [
+        2
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "rust_docs",
+      "action": "rust_docs",
+      "inputs": [
+        0
+      ],
+      "outputs": [
+        3
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "rust_coverage",
+      "action": "rust_coverage",
+      "inputs": [
+        0
+      ],
+      "outputs": [
+        4
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "build_wheel",
+      "action": "build_wheel",
+      "inputs": [
+        0
+      ],
+      "outputs": [
+        5
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "install_wheel",
+      "action": "install_wheel",
+      "inputs": [
+        0,
+        5
+      ],
+      "outputs": [
+        6
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "test_wheel",
+      "action": "test_wheel",
+      "inputs": [
+        0,
+        6
+      ],
+      "outputs": [
+        7
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "python_docs",
+      "action": "python_docs",
+      "inputs": [
+        0,
+        6
+      ],
+      "outputs": [
+        8
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "python_coverage",
+      "action": "python_coverage",
+      "inputs": [
+        0,
+        6
+      ],
+      "outputs": [
+        9
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "refresh_profile",
+      "action": "refresh_profile",
+      "inputs": [
+        0
+      ],
+      "outputs": [
+        10
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ],
+      "shell": {
+        "script": "cargo build --release -p loom\n./target/release/loom profile github --workflow main.yml --runs 20 --out ci/profile.json",
+        "capture": "NoCapture",
+        "env": {
+          "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+        }
+      }
+    },
+    {
+      "name": "commit_profile",
+      "action": "commit_profile",
+      "inputs": [
+        0,
+        10
+      ],
+      "after": [
+        0,
+        1,
+        2
+      ],
+      "consequences": [
+        0
+      ]
+    }
+  ],
+  "consequences": [
+    {
+      "name": "commit_profile.gitwrite",
+      "kind": "GitWrite",
+      "requires_approval": false
+    }
+  ],
+  "inventory": {
+    "id": "ariadne-ci",
+    "actors": [
+      {
+        "id": "runner",
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "capabilities": [
+          "linux",
+          "x86_64"
+        ]
+      }
+    ],
+    "implementations": [
+      {
+        "id": "git"
+      },
+      {
+        "id": "rust",
+        "version": "stable"
+      },
+      {
+        "id": "cargo"
+      },
+      {
+        "id": "python",
+        "version": "3.12"
+      },
+      {
+        "id": "maturin"
+      },
+      {
+        "id": "ruff"
+      },
+      {
+        "id": "pdoc"
+      },
+      {
+        "id": "pytest"
+      }
+    ]
+  },
+  "triggers": [
+    {
+      "kind": "push",
+      "branches": [
+        "main"
+      ]
+    }
+  ],
+  "policies": {
+    "install_dependencies": true,
+    "objectives": [
+      "dollar_cost",
+      "critical_path"
+    ]
+  },
+  "action_defs": [
+    {
+      "id": "checkout",
+      "outputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "scm.checkout"
+        }
+      ]
+    },
+    {
+      "id": "rust_fmt",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "fmt.check",
+          "using": "cargo"
+        }
+      ]
+    },
+    {
+      "id": "python_fmt",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "fmt.check",
+          "args": {
+            "paths": [
+              "frontends/python"
+            ]
+          },
+          "using": "ruff"
+        }
+      ]
+    },
+    {
+      "id": "build_loom",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "loom",
+          "ty": "Binary",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "build.binary",
+          "args": {
+            "package": "loom",
+            "release": true
+          },
+          "prefer": [
+            "cargo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_workspace",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        },
+        {
+          "name": "loom",
+          "ty": "Binary",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "ty": "TestReport",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "test.unit",
+          "args": {
+            "args": [
+              "--workspace",
+              "--",
+              "--test-threads=4"
+            ]
+          },
+          "prefer": [
+            "cargo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rust_docs",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "docs",
+          "ty": "DocsSite",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "docs.generate",
+          "prefer": [
+            "cargo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rust_coverage",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "coverage",
+          "ty": "CoverageData",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "coverage.measure",
+          "args": {
+            "out": "lcov.info"
+          },
+          "prefer": [
+            "cargo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "build_wheel",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "wheel",
+          "ty": "Wheel",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "build.python_wheel",
+          "args": {
+            "dir": "frontends/python",
+            "release": true,
+            "out": "../../dist"
+          },
+          "prefer": [
+            "maturin",
+            "ruff",
+            "pdoc",
+            "pytest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_wheel",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        },
+        {
+          "name": "wheel",
+          "ty": "Wheel",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "env",
+          "ty": "Wheel",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "package.install",
+          "args": {
+            "package": "dist/*.whl"
+          },
+          "using": "pip",
+          "prefer": [
+            "maturin",
+            "ruff",
+            "pdoc",
+            "pytest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_wheel",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        },
+        {
+          "name": "env",
+          "ty": "Wheel",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "report",
+          "ty": "TestReport",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "test.unit",
+          "args": {
+            "paths": [
+              "frontends/python/tests/"
+            ],
+            "args": [
+              "-v"
+            ]
+          },
+          "prefer": [
+            "maturin",
+            "ruff",
+            "pdoc",
+            "pytest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "python_docs",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        },
+        {
+          "name": "env",
+          "ty": "Wheel",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "docs",
+          "ty": "DocsSite",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "docs.generate",
+          "args": {
+            "package": "ariadne",
+            "out": "frontends/python/docs"
+          },
+          "prefer": [
+            "maturin",
+            "ruff",
+            "pdoc",
+            "pytest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "python_coverage",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        },
+        {
+          "name": "env",
+          "ty": "Wheel",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "coverage",
+          "ty": "CoverageData",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "coverage.measure",
+          "args": {
+            "paths": [
+              "frontends/python/tests"
+            ],
+            "package": "ariadne",
+            "out": "py-coverage.xml"
+          },
+          "prefer": [
+            "maturin",
+            "ruff",
+            "pdoc",
+            "pytest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "refresh_profile",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "profile",
+          "ty": "ProfileData",
+          "kind": "artifact"
+        }
+      ],
+      "implementations": [
+        {
+          "kind": "shell",
+          "run": "cargo build --release -p loom\n./target/release/loom profile github --workflow main.yml --runs 20 --out ci/profile.json",
+          "capture": "NoCapture",
+          "env": {
+            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "commit_profile",
+      "inputs": [
+        {
+          "name": "src",
+          "ty": "SourceTree",
+          "kind": "artifact"
+        },
+        {
+          "name": "profile",
+          "ty": "ProfileData",
+          "kind": "artifact"
+        }
+      ],
+      "consequences": [
+        "GitWrite"
+      ],
+      "implementations": [
+        {
+          "kind": "semantic",
+          "op": "scm.commit",
+          "args": {
+            "paths": [
+              "ci/profile.json"
+            ],
+            "message": "[profile] refresh from CI runs [skip ci]",
+            "push": true
+          }
+        }
+      ]
+    }
+  ]
+}

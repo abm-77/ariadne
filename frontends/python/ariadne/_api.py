@@ -145,6 +145,11 @@ class Pipeline:
         """Compute a baseline execution plan."""
         return self._inner.plan()
 
+    def to_tir_json(self, indent: int = 2) -> str:
+        """Serialize the workflow to TIR JSON (the canonical interchange the
+        `loom` CLI loads with `check`/`explain`/`plan`)."""
+        return self._graph.emit_json(indent=indent)
+
     def optimize(self, plan, backend: str = "local", level: int = 2, profile=None):
         """Optimize a plan for the given backend and optimization level (0-3).
         `profile` (dict or JSON str) feeds the cost model with runner costs,
