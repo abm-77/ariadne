@@ -21,7 +21,8 @@ jobs:
         name: refresh_profile-profile
         path: profile.json
         retention-days: '1'
-  rust-fmt-and-rust-docs-and-rust-coverage-and-build-loom-and-test-workspace:
+  # fuses: rust_fmt, rust_docs, rust_coverage, build_loom, test_workspace
+  fused-8a420aa2:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -58,8 +59,8 @@ jobs:
         name: test_workspace-report
         path: test-results.xml
         retention-days: '1'
-  python-fmt-and-build-core-ext-and-build-wheel-and-install-wheel-and-test-wheel-and-python-d-80b4fe17:
-    name: python-fmt-and-build-core-ext-and-build-wheel-and-install-wheel-and-test-wheel-and-python-docs-and-python-coverage
+  # fuses: python_fmt, build_core_ext, build_wheel, install_wheel, test_wheel, python_docs, python_coverage
+  fused-74497ccf:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
