@@ -99,7 +99,7 @@ mod tests {
     /// Producer and consumer pinned to the same actor.
     fn same_host_wf() -> Workflow {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn different_runners_keep_copy() {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");

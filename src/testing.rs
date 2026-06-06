@@ -427,7 +427,7 @@ mod tests {
 
     fn rich_wf() -> Workflow {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact_at("bin", ArtifactType::Binary, "out/app");
         let co = b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
@@ -507,7 +507,7 @@ mod tests {
         // SharedVolume placement must fall back to copy and surface a warning.
         use crate::ir::{ArtifactType, PlacementStrategy, WorkflowBuilder};
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let co = b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");

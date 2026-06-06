@@ -154,7 +154,7 @@
     },
     {
       "assert": "transfer_used",
-      "artifact": "src",
+      "artifact": "bin",
       "kind": "copy"
     },
     {

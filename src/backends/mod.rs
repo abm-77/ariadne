@@ -640,7 +640,7 @@ mod tests {
         use crate::ir::{ArtifactType, WorkflowBuilder};
         use crate::planner::plan;
         let mut b = WorkflowBuilder::new("test");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         b.shell_action("build", "build", &[src], &[bin], "cargo build");

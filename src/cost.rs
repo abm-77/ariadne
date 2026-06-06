@@ -175,7 +175,7 @@ mod tests {
     fn estimate_uses_critical_path_and_profile() {
         use crate::ir::{ArtifactType, WorkflowBuilder};
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         b.shell_action("checkout", "checkout", &[], &[src], "co");
         b.shell_action("build", "build", &[src], &[bin], "make");

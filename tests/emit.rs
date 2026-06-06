@@ -21,10 +21,14 @@ fn golden_yaml_matches() {
 }
 
 #[test]
-fn build_needs_checkout() {
+fn build_self_checks_out() {
+    // Source is ambient: there is no checkout job; the build job reacquires the
+    // repo itself via a checkout step rather than depending on a checkout job.
     let plan = ariadne::planner::plan(&fixture()).unwrap();
+    assert!(plan.units.iter().all(|u| u.action_name != "checkout"));
     let build = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-    assert!(build.needs.iter().any(|n| n == "checkout"), "{:?}", build.needs);
+    assert!(!build.needs.iter().any(|n| n == "checkout"), "{:?}", build.needs);
+    assert!(build.ops.iter().any(|op| matches!(op, ariadne::planner::LogicalOp::CheckoutRepo)));
 }
 
 #[test]

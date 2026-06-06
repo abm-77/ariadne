@@ -158,7 +158,7 @@ mod tests {
 
     fn wf_secret_effect() -> Workflow {
         let mut b = WorkflowBuilder::new("test");
-        let src = b.artifact("source", ArtifactType::SourceTree);
+        let src = b.artifact("source", ArtifactType::Binary);
         let bin = b.artifact("binary", ArtifactType::Binary);
         b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         let build = b.shell_action("build", "build", &[src], &[bin], "cargo build --release");
