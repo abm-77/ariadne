@@ -1,13 +1,16 @@
+use ariadne::Pipeline;
 use ariadne::backends::Backend;
 use ariadne::backends::local::LocalBackend;
 use ariadne::backends::registry::BackendRegistry;
-use ariadne::Pipeline;
 use clap::{Parser, Subcommand};
 use loom::{has_errors, load_workflow, print_diags};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "loom", about = "Loom — a language-agnostic CLI over Thread IR (TIR)")]
+#[command(
+    name = "loom",
+    about = "Loom — a language-agnostic CLI over Thread IR (TIR)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -106,23 +109,40 @@ fn main() {
             let wf = load_workflow_or_exit(&file);
             let diags = Pipeline::new(wf).validate();
             print_diags(&diags);
-            if has_errors(&diags) { std::process::exit(1); }
+            if has_errors(&diags) {
+                std::process::exit(1);
+            }
             println!("Workflow is valid.");
         }
-        Cmd::Plan { file, backend, out, opt_level, profile } => {
+        Cmd::Plan {
+            file,
+            backend,
+            out,
+            opt_level,
+            profile,
+        } => {
             let pipeline = validated_pipeline_or_exit(&file);
             let plan = match pipeline.plan() {
-                Ok(plan) => { print_diags(&plan.diagnostics); plan }
-                Err(errs) => { print_diags(&errs); std::process::exit(1); }
+                Ok(plan) => {
+                    print_diags(&plan.diagnostics);
+                    plan
+                }
+                Err(errs) => {
+                    print_diags(&errs);
+                    std::process::exit(1);
+                }
             };
             let prof = load_profile(profile.as_deref());
             let mut registry = BackendRegistry::with_builtins();
             let b = registry.resolve_or_die(&backend);
             let caps = ariadne::backends::derive_capability_profile_from_inventory(
-                pipeline.workflow.inventory.as_ref()
+                pipeline.workflow.inventory.as_ref(),
             );
             let plan = optimize_plan(&pipeline.workflow, plan, caps, opt_level, &prof);
-            let output = b.emit(&plan).unwrap_or_else(|errs| { print_diags(&errs); std::process::exit(1); });
+            let output = b.emit(&plan).unwrap_or_else(|errs| {
+                print_diags(&errs);
+                std::process::exit(1);
+            });
             match out {
                 Some(path) => {
                     if let Err(e) = std::fs::write(&path, &output) {
@@ -145,16 +165,24 @@ fn main() {
             };
             print!("{output}");
         }
-        Cmd::Explain { file, backend, opt_level, profile } => {
+        Cmd::Explain {
+            file,
+            backend,
+            opt_level,
+            profile,
+        } => {
             let pipeline = validated_pipeline_or_exit(&file);
             let plan = match pipeline.plan() {
                 Ok(plan) => plan,
-                Err(errs) => { print_diags(&errs); std::process::exit(1); }
+                Err(errs) => {
+                    print_diags(&errs);
+                    std::process::exit(1);
+                }
             };
             let prof = load_profile(profile.as_deref());
             let mut registry = BackendRegistry::with_builtins();
             let caps = ariadne::backends::derive_capability_profile_from_inventory(
-                pipeline.workflow.inventory.as_ref()
+                pipeline.workflow.inventory.as_ref(),
             );
             let plan = optimize_plan(&pipeline.workflow, plan, caps, opt_level, &prof);
             print_explain(&plan, &prof);
@@ -166,20 +194,43 @@ fn main() {
                 }
             }
         }
-        Cmd::Profile { backend, workflow, repo, runs, from, out } => {
+        Cmd::Profile {
+            backend,
+            workflow,
+            repo,
+            runs,
+            from,
+            out,
+        } => {
             let registry = ariadne::telemetry::CollectorRegistry::with_builtins();
             let Some(collector) = registry.resolve(&backend) else {
-                eprintln!("error: no profile collector for backend '{backend}'; have: {}",
-                    registry.ids().join(", "));
+                eprintln!(
+                    "error: no profile collector for backend '{backend}'; have: {}",
+                    registry.ids().join(", ")
+                );
                 std::process::exit(1);
             };
-            let raw = match gather_runs(&backend, workflow.as_deref(), repo.as_deref(), runs, from.as_deref()) {
-                Ok(r) if r.is_empty() => { eprintln!("error: no run telemetry found"); std::process::exit(1); }
+            let raw = match gather_runs(
+                &backend,
+                workflow.as_deref(),
+                repo.as_deref(),
+                runs,
+                from.as_deref(),
+            ) {
                 Ok(r) => r,
-                Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
             };
+            // No telemetry yet (e.g. the first run, before any successful run to
+            // profile) is not an error: write an empty profile and carry on.
+            if raw.is_empty() {
+                eprintln!("note: no prior run telemetry; writing an empty profile");
+            }
             let reports = collector.parse(&raw).unwrap_or_else(|e| {
-                eprintln!("error: {e}"); std::process::exit(1);
+                eprintln!("error: {e}");
+                std::process::exit(1);
             });
             let profile = ariadne::telemetry::aggregate(&reports, &collector.runner_pricing());
             let json = serde_json::to_string_pretty(&profile).expect("serialize profile");
@@ -189,11 +240,21 @@ fn main() {
             }
             eprintln!("wrote {} from {} run(s)", out.display(), reports.len());
         }
-        Cmd::Test { event, tests, image, workdir, file } => {
+        Cmd::Test {
+            event,
+            tests,
+            image,
+            workdir,
+            file,
+        } => {
             let pipeline = validated_pipeline_or_exit(&file);
             let mut backend = LocalBackend::podman();
-            if let Some(i) = image { backend = backend.with_image(i); }
-            if let Some(w) = workdir { backend = backend.with_workdir(w); }
+            if let Some(i) = image {
+                backend = backend.with_image(i);
+            }
+            if let Some(w) = workdir {
+                backend = backend.with_workdir(w);
+            }
             let suite_path = tests.unwrap_or_else(|| sidecar_suite(&file));
             if suite_path.exists() {
                 run_suite(&pipeline.workflow, &suite_path, &backend);
@@ -201,15 +262,26 @@ fn main() {
                 use ariadne::testing::Executor;
                 let ctx = parse_event(&event);
                 let plan = match ariadne::planner::plan_for(&pipeline.workflow, &ctx) {
-                    Ok(plan) => { print_diags(&plan.diagnostics); plan }
-                    Err(errs) => { print_diags(&errs); std::process::exit(1); }
+                    Ok(plan) => {
+                        print_diags(&plan.diagnostics);
+                        plan
+                    }
+                    Err(errs) => {
+                        print_diags(&errs);
+                        std::process::exit(1);
+                    }
                 };
                 match backend.execute(&plan) {
                     Ok(run) => {
                         print_test_run(&run);
-                        if !run.passed() { std::process::exit(1); }
+                        if !run.passed() {
+                            std::process::exit(1);
+                        }
                     }
-                    Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -219,7 +291,10 @@ fn main() {
 /// Default test-suite path for a workflow: the base name (before any extension)
 /// plus `.test.json`. So `release.tir.pb` -> `release.test.json`.
 fn sidecar_suite(file: &std::path::Path) -> PathBuf {
-    let name = file.file_name().and_then(|s| s.to_str()).unwrap_or("workflow");
+    let name = file
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("workflow");
     let base = name.split('.').next().unwrap_or("workflow");
     file.with_file_name(format!("{base}.test.json"))
 }
@@ -229,9 +304,11 @@ fn run_suite<E: Backend + ariadne::testing::Executor>(
     suite_path: &std::path::Path,
     backend: &E,
 ) {
-    use ariadne::testing::{run_case, TestSuite};
-    let suite = TestSuite::load(suite_path)
-        .unwrap_or_else(|e| { eprintln!("error: {e}"); std::process::exit(1); });
+    use ariadne::testing::{TestSuite, run_case};
+    let suite = TestSuite::load(suite_path).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
 
     let mut failed = 0;
     println!("Test suite: {} case(s)", suite.cases.len());
@@ -240,7 +317,11 @@ fn run_suite<E: Backend + ariadne::testing::Executor>(
             Ok(report) => {
                 let fails: Vec<_> = report.failures().collect();
                 if fails.is_empty() {
-                    println!("  [PASS] {} ({} assertions)", case.name, report.results.len());
+                    println!(
+                        "  [PASS] {} ({} assertions)",
+                        case.name,
+                        report.results.len()
+                    );
                 } else {
                     failed += 1;
                     println!("  [FAIL] {}", case.name);
@@ -249,11 +330,20 @@ fn run_suite<E: Backend + ariadne::testing::Executor>(
                     }
                 }
             }
-            Err(e) => { failed += 1; println!("  [ERR ] {}: {e}", case.name); }
+            Err(e) => {
+                failed += 1;
+                println!("  [ERR ] {}: {e}", case.name);
+            }
         }
     }
-    println!("{}/{} cases passed", suite.cases.len() - failed, suite.cases.len());
-    if failed > 0 { std::process::exit(1); }
+    println!(
+        "{}/{} cases passed",
+        suite.cases.len() - failed,
+        suite.cases.len()
+    );
+    if failed > 0 {
+        std::process::exit(1);
+    }
 }
 
 /// Gather raw per-run telemetry for a backend: from a directory of pre-fetched
@@ -268,53 +358,86 @@ fn gather_runs(
     use ariadne::telemetry::RawRun;
     if let Some(dir) = from {
         let mut out = Vec::new();
-        let entries = std::fs::read_dir(dir).map_err(|e| format!("read dir '{}': {e}", dir.display()))?;
-        let mut paths: Vec<_> = entries.filter_map(|e| e.ok().map(|e| e.path()))
+        let entries =
+            std::fs::read_dir(dir).map_err(|e| format!("read dir '{}': {e}", dir.display()))?;
+        let mut paths: Vec<_> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|x| x == "json"))
             .collect();
         paths.sort();
         for p in paths {
-            out.push(RawRun(std::fs::read_to_string(&p).map_err(|e| format!("read '{}': {e}", p.display()))?));
+            out.push(RawRun(
+                std::fs::read_to_string(&p).map_err(|e| format!("read '{}': {e}", p.display()))?,
+            ));
         }
         return Ok(out);
     }
     match backend {
-        "github" => fetch_github_runs(workflow.ok_or("--workflow is required for github (e.g. --workflow main.yml)")?, repo, runs),
-        other => Err(format!("fetching runs for backend '{other}' is not supported; use --from <dir>")),
+        "github" => fetch_github_runs(
+            workflow.ok_or("--workflow is required for github (e.g. --workflow main.yml)")?,
+            repo,
+            runs,
+        ),
+        other => Err(format!(
+            "fetching runs for backend '{other}' is not supported; use --from <dir>"
+        )),
     }
 }
 
 /// Fetch the most recent successful runs of a GitHub workflow and bundle each
 /// run's jobs + artifacts responses into one JSON payload the collector parses.
 /// Uses the `gh` CLI so auth is handled by the user's existing login.
-fn fetch_github_runs(workflow: &str, repo: Option<&str>, runs: u32) -> Result<Vec<ariadne::telemetry::RawRun>, String> {
+fn fetch_github_runs(
+    workflow: &str,
+    repo: Option<&str>,
+    runs: u32,
+) -> Result<Vec<ariadne::telemetry::RawRun>, String> {
     use ariadne::telemetry::RawRun;
     // `gh api` substitutes {owner}/{repo} from the current repository.
     let r = repo.unwrap_or("{owner}/{repo}");
     let ids_json = gh(&[
         "api".into(),
         format!("repos/{r}/actions/workflows/{workflow}/runs?status=success&per_page={runs}"),
-        "--jq".into(), ".workflow_runs[].id".into(),
+        "--jq".into(),
+        ".workflow_runs[].id".into(),
     ])?;
-    let ids: Vec<&str> = ids_json.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    if ids.is_empty() {
-        return Err(format!("no successful runs found for workflow '{workflow}'"));
-    }
+    let ids: Vec<&str> = ids_json
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    // No successful runs yet (e.g. bootstrapping a brand-new workflow) yields an
+    // empty profile rather than an error.
     let mut out = Vec::new();
     for id in ids {
-        let jobs = gh(&["api".into(), format!("repos/{r}/actions/runs/{id}/jobs?per_page=100")])?;
-        let artifacts = gh(&["api".into(), format!("repos/{r}/actions/runs/{id}/artifacts?per_page=100")])?;
-        out.push(RawRun(format!("{{\"jobs\":{jobs},\"artifacts\":{artifacts}}}")));
+        let jobs = gh(&[
+            "api".into(),
+            format!("repos/{r}/actions/runs/{id}/jobs?per_page=100"),
+        ])?;
+        let artifacts = gh(&[
+            "api".into(),
+            format!("repos/{r}/actions/runs/{id}/artifacts?per_page=100"),
+        ])?;
+        out.push(RawRun(format!(
+            "{{\"jobs\":{jobs},\"artifacts\":{artifacts}}}"
+        )));
     }
     Ok(out)
 }
 
 /// Run `gh` with the given args, returning stdout or a friendly error.
 fn gh(args: &[String]) -> Result<String, String> {
-    let output = std::process::Command::new("gh").args(args).output()
-        .map_err(|e| format!("failed to run gh: {e} (install the GitHub CLI: https://cli.github.com)"))?;
+    let output = std::process::Command::new("gh")
+        .args(args)
+        .output()
+        .map_err(|e| {
+            format!("failed to run gh: {e} (install the GitHub CLI: https://cli.github.com)")
+        })?;
     if !output.status.success() {
-        return Err(format!("gh api failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        return Err(format!(
+            "gh api failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -322,7 +445,10 @@ fn gh(args: &[String]) -> Result<String, String> {
 fn load_profile(profile: Option<&std::path::Path>) -> ariadne::profile::Profile {
     use ariadne::profile::Profile;
     match profile {
-        Some(p) => Profile::load(p).unwrap_or_else(|e| { eprintln!("error: {e}"); std::process::exit(1) }),
+        Some(p) => Profile::load(p).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            std::process::exit(1)
+        }),
         None => Profile::default(),
     }
 }
@@ -335,7 +461,7 @@ fn optimize_plan(
     prof: &ariadne::profile::Profile,
 ) -> ariadne::planner::Plan {
     use ariadne::analysis::Analysis;
-    use ariadne::optimize::{optimize, OptLevel, OptimizeCtx};
+    use ariadne::optimize::{OptLevel, OptimizeCtx, optimize};
     let analysis = Analysis::of(wf);
     let ctx = OptimizeCtx {
         workflow: wf,
@@ -354,8 +480,12 @@ fn parse_event(s: &str) -> ariadne::testing::EventContext {
     match s {
         "pr" => EventContext::PullRequest { fork: false },
         "fork-pr" => EventContext::PullRequest { fork: true },
-        "tag" => EventContext::Tag { name: "v0.0.0".into() },
-        _ => EventContext::Push { branch: "main".into() },
+        "tag" => EventContext::Tag {
+            name: "v0.0.0".into(),
+        },
+        _ => EventContext::Push {
+            branch: "main".into(),
+        },
     }
 }
 
@@ -379,7 +509,10 @@ fn print_test_run(run: &ariadne::testing::TestRun) {
             println!("    secrets (spoofed): {}", unit.secrets_spoofed.join(", "));
         }
         if !unit.secrets_withheld.is_empty() {
-            println!("    secrets (withheld): {}", unit.secrets_withheld.join(", "));
+            println!(
+                "    secrets (withheld): {}",
+                unit.secrets_withheld.join(", ")
+            );
         }
         for e in &unit.consequences_fired {
             println!("    effect would fire: {} ({:?})", e.name, e.kind);
@@ -399,7 +532,10 @@ fn print_test_run(run: &ariadne::testing::TestRun) {
 }
 
 fn indent(s: &str) -> String {
-    s.lines().map(|l| format!("      {l}")).collect::<Vec<_>>().join("\n")
+    s.lines()
+        .map(|l| format!("      {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn op_label(op: &ariadne::planner::LogicalOp) -> String {
@@ -408,7 +544,9 @@ fn op_label(op: &ariadne::planner::LogicalOp) -> String {
         LogicalOp::CheckoutRepo => "checkout repository".to_string(),
         LogicalOp::RunShell { label, .. } => format!("run shell: {label}"),
         LogicalOp::UploadArtifact { name, .. } => format!("upload artifact '{name}' (copy)"),
-        LogicalOp::DownloadArtifact { name, .. } => format!("download artifact '{name}' (copy fallback)"),
+        LogicalOp::DownloadArtifact { name, .. } => {
+            format!("download artifact '{name}' (copy fallback)")
+        }
         LogicalOp::TransferArtifact { name, access, .. } => {
             let how = match access {
                 AccessMode::Copy => "copy",
@@ -437,7 +575,11 @@ fn human_bytes(n: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{n} B") } else { format!("{v:.1} {}", UNITS[i]) }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
 }
 
 fn print_explain(plan: &ariadne::planner::Plan, profile: &ariadne::profile::Profile) {
@@ -450,27 +592,52 @@ fn print_explain(plan: &ariadne::planner::Plan, profile: &ariadne::profile::Prof
     }
 
     let cost = Cost::estimate(plan, profile);
-    println!("  estimated cost: makespan {:.1}s, transfer {}, ${:.4}",
-        cost.seconds, human_bytes(cost.transfer_bytes), cost.dollars);
+    println!(
+        "  estimated cost: makespan {:.1}s, transfer {}, ${:.4}",
+        cost.seconds,
+        human_bytes(cost.transfer_bytes),
+        cost.dollars
+    );
 
     for unit in &plan.units {
-        println!("\n  [{}] {} (runner: {})", unit.id, unit.action_name, unit.runner);
+        println!(
+            "\n  [{}] {} (runner: {})",
+            unit.id, unit.action_name, unit.runner
+        );
         if !unit.needs.is_empty() {
-            println!("    needs: {}", unit.needs.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", "));
+            println!(
+                "    needs: {}",
+                unit.needs
+                    .iter()
+                    .map(|n| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
         for op in &unit.ops {
             println!("    - {}", op_label(op));
         }
         for e in &unit.consequences {
-            println!("    effect: {} ({:?}){}", e.name, e.kind,
-                if e.requires_approval { " [requires approval]" } else { "" });
+            println!(
+                "    effect: {} ({:?}){}",
+                e.name,
+                e.kind,
+                if e.requires_approval {
+                    " [requires approval]"
+                } else {
+                    ""
+                }
+            );
         }
     }
 
     if !plan.optimizations.is_empty() {
         println!("\n  optimizations:");
         for o in &plan.optimizations {
-            println!("    [{}] {}: {} -> {} ({})", o.pass, o.target, o.from, o.to, o.reason);
+            println!(
+                "    [{}] {}: {} -> {} ({})",
+                o.pass, o.target, o.from, o.to, o.reason
+            );
         }
     }
 
@@ -482,7 +649,10 @@ fn print_explain(plan: &ariadne::planner::Plan, profile: &ariadne::profile::Prof
     }
 }
 
-fn explain_selection_dyn(plan: &ariadne::planner::Plan, backend: &dyn ariadne::backends::EmittingBackend) {
+fn explain_selection_dyn(
+    plan: &ariadne::planner::Plan,
+    backend: &dyn ariadne::backends::EmittingBackend,
+) {
     println!("\n  instruction selection ({}):", backend.id());
     for unit in &plan.units {
         println!("    [{}]", unit.id);
@@ -496,13 +666,18 @@ fn explain_selection_dyn(plan: &ariadne::planner::Plan, backend: &dyn ariadne::b
 }
 
 fn load_workflow_or_exit(path: &std::path::Path) -> ariadne::ir::Workflow {
-    load_workflow(path).unwrap_or_else(|e| { eprintln!("error: {e}"); std::process::exit(1); })
+    load_workflow(path).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    })
 }
 
 fn validated_pipeline_or_exit(path: &std::path::Path) -> Pipeline {
     let pipeline = Pipeline::new(load_workflow_or_exit(path));
     let diags = pipeline.validate();
     print_diags(&diags);
-    if has_errors(&diags) { std::process::exit(1); }
+    if has_errors(&diags) {
+        std::process::exit(1);
+    }
     pipeline
 }
