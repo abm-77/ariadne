@@ -276,6 +276,13 @@ fn setup_steps(plan: &Plan, unit: &crate::planner::ExecutionUnit) -> Vec<GhStep>
         .collect()
 }
 
+/// A GitHub job id from an action name: lowercase kebab-case. A fused unit's
+/// action name is already the fused names joined with '-', so its job is named
+/// for everything it runs.
+fn job_key(action_name: &str) -> String {
+    action_name.to_lowercase().replace([' ', '_', '+'], "-")
+}
+
 fn setup_uses(name: &str, uses: &str, key: &str, value: String) -> GhStep {
     let mut with = IndexMap::new();
     with.insert(key.to_string(), value);
@@ -387,6 +394,14 @@ fn plan_to_gha(
 ) -> GhWorkflow {
     let on = build_on(&plan.triggers, opts);
 
+    // The job id is the (kebab-cased) action name, so a fused unit's job is named
+    // for all the actions it ran. `needs` reference these same keys.
+    let job_id: std::collections::HashMap<ustr::Ustr, String> = plan
+        .units
+        .iter()
+        .map(|u| (u.id, job_key(&u.action_name)))
+        .collect();
+
     let jobs = plan
         .units
         .iter()
@@ -417,10 +432,10 @@ fn plan_to_gha(
             }
 
             (
-                unit.id.to_string(),
+                job_id[&unit.id].clone(),
                 GhJob {
                     runs_on: unit.runner.to_string(),
-                    needs: unit.needs.iter().map(|n| n.to_string()).collect(),
+                    needs: unit.needs.iter().map(|n| job_id[n].clone()).collect(),
                     environment: unit_environment(&unit.ops),
                     timeout_minutes: unit.timeout.as_deref().and_then(timeout_minutes),
                     concurrency: unit.coordination.as_ref().map(concurrency_of),
