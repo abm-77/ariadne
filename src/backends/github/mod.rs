@@ -226,6 +226,23 @@ fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<GhStep> {
     }
 }
 
+/// GITHUB_TOKEN scopes a job needs, derived from its declared consequences: a
+/// GitWrite effect needs `contents: write`, a PublishRelease needs it too. Empty
+/// otherwise (the default read-only token).
+fn job_permissions(unit: &crate::planner::ExecutionUnit) -> IndexMap<String, String> {
+    use crate::ir::ConsequenceKind;
+    let mut perms = IndexMap::new();
+    for c in &unit.consequences {
+        match c.kind {
+            ConsequenceKind::GitWrite | ConsequenceKind::PublishRelease => {
+                perms.insert("contents".into(), "write".into());
+            }
+            _ => {}
+        }
+    }
+    perms
+}
+
 fn unit_environment(ops: &[LogicalOp]) -> Option<String> {
     ops.iter().find_map(|op| {
         if let LogicalOp::RequestApproval { reason } = op {
@@ -495,6 +512,7 @@ fn plan_to_gha(
                 GhJob {
                     runs_on: unit.runner.to_string(),
                     needs: unit.needs.iter().map(|n| job_id[n].clone()).collect(),
+                    permissions: job_permissions(unit),
                     environment: unit_environment(&unit.ops),
                     timeout_minutes: unit.timeout.as_deref().and_then(timeout_minutes),
                     concurrency: unit.coordination.as_ref().map(concurrency_of),
@@ -585,6 +603,8 @@ pub struct GhJob {
     pub runs_on: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub permissions: IndexMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
     #[serde(rename = "timeout-minutes", skip_serializing_if = "Option::is_none")]
