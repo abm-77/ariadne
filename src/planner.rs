@@ -337,16 +337,23 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
         unit_id_for_action.insert(action_id, unit_id);
 
         // Depend only on producers of non-source inputs; source is self-acquired.
-        let mut needs: Vec<Ustr> = action
+        // Explicit `after` edges add ordering with no data flow (e.g. gates).
+        let mut need_set: std::collections::HashSet<Ustr> = action
             .inputs
             .iter()
             .filter(|&&art_id| !is_source(art_id))
             .filter_map(|&art_id| workflow.artifact(art_id).producer)
             .filter(|&pred| pred != action_id)
             .filter_map(|pred| unit_id_for_action.get(&pred).copied())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
             .collect();
+        for a in &action.after {
+            if *a != action_id
+                && let Some(uid) = unit_id_for_action.get(a).copied()
+            {
+                need_set.insert(uid);
+            }
+        }
+        let mut needs: Vec<Ustr> = need_set.into_iter().collect();
         needs.sort();
 
         let mut ops: Vec<LogicalOp> = Vec::new();
@@ -635,13 +642,19 @@ fn topo_sort(workflow: &Workflow) -> Result<Vec<ActionCallId>, Vec<Diagnostic>> 
     let mut rdeps: Vec<Vec<usize>> = vec![Vec::new(); n];
 
     for (idx, action) in workflow.action_calls.iter().enumerate() {
-        let preds: std::collections::HashSet<usize> = action
+        let mut preds: std::collections::HashSet<usize> = action
             .inputs
             .iter()
             .filter_map(|&art_id| workflow.artifact(art_id).producer)
             .filter(|&p| p.idx() != idx)
             .map(|p| p.idx())
             .collect();
+        // Explicit ordering edges (`after`) are dependencies for scheduling too.
+        for a in &action.after {
+            if a.idx() != idx {
+                preds.insert(a.idx());
+            }
+        }
         in_degree[idx] = preds.len();
         for pred in preds {
             rdeps[pred].push(idx);
