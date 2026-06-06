@@ -5,7 +5,7 @@ import functools
 from typing import Any
 
 from ._graph import WorkflowGraph, _current, current_graph
-from ._handle import ArtifactHandle, Outputs
+from ._handle import ArtifactHandle, CallRef, Outputs
 from ._types import (
     Consequence,
     ConsequenceKind,
@@ -112,8 +112,12 @@ class ActionDef:
             }
         )
 
-    def __call__(self, *args: Any, **kwargs: Any) -> ArtifactHandle | Outputs | None:
+    def __call__(self, *args: Any, **kwargs: Any) -> "ArtifactHandle | Outputs | CallRef":
         graph = current_graph()
+
+        # `after=[...]` is a reserved ordering hint, not an action argument: it
+        # adds gate edges (no data flow) to the calls/handles it references.
+        after_refs = kwargs.pop("after", None)
 
         bound = self.sig.bind(*args, **kwargs)
         bound.apply_defaults()
@@ -152,9 +156,13 @@ class ActionDef:
                 raise TypeError(f"consequences must be Consequence or ConsequenceKind, got {e!r}")
             consequence_ids.append(cid)
 
+        after_ids = _resolve_after(graph, after_refs)
+
         rec: dict[str, Any] = {"name": self.name, "action": self.name}
         if artifact_inputs:
             rec["inputs"] = artifact_inputs
+        if after_ids:
+            rec["after"] = after_ids
         out_ids = [h.artifact_id for h in output_handles.values()]
         if out_ids:
             rec["outputs"] = out_ids
@@ -179,10 +187,38 @@ class ActionDef:
             graph._set_producer(h.artifact_id, action_call_id)
 
         if not output_handles:
-            return None
+            # No data handle to return, but the call is still referenceable for
+            # `after=` ordering edges.
+            return CallRef(action_call_id)
         if len(output_handles) == 1:
             return next(iter(output_handles.values()))
         return Outputs(**output_handles)
+
+
+def _resolve_after(graph: WorkflowGraph, refs: Any) -> list[int]:
+    """Resolve `after=[...]` references to action-call ids. Accepts CallRefs
+    (no-output actions), artifact handles / Outputs (use their producing call),
+    or a single such value."""
+    if refs is None:
+        return []
+    if isinstance(refs, (CallRef, ArtifactHandle, Outputs)):
+        refs = [refs]
+    ids: list[int] = []
+    for r in refs:
+        if isinstance(r, CallRef):
+            ids.append(r.call_id)
+        elif isinstance(r, ArtifactHandle):
+            cid = graph._producer_of(r.artifact_id)
+            if cid is not None:
+                ids.append(cid)
+        elif isinstance(r, Outputs):
+            for h in r.__dict__.values():
+                cid = graph._producer_of(h.artifact_id)
+                if cid is not None:
+                    ids.append(cid)
+        else:
+            raise TypeError(f"after= expects a CallRef/handle/Outputs, got {type(r)!r}")
+    return sorted(set(ids))
 
 
 def _output_tir_str(spec: type | OutputDecl) -> str:

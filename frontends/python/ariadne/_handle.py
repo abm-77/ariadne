@@ -53,3 +53,19 @@ class Outputs:
     def __repr__(self) -> str:
         names = ", ".join(k for k in self.__dict__)
         return f"Outputs({names})"
+
+
+class CallRef:
+    """A reference to an action call, returned even when the action has no
+    outputs. Pass it as `after=[...]` to add an ordering edge (a gate) to a later
+    action, with no data flow between them."""
+
+    def __init__(self, call_id: int):
+        self._call_id = call_id
+
+    @property
+    def call_id(self) -> int:
+        return self._call_id
+
+    def __repr__(self) -> str:
+        return f"CallRef({self._call_id})"

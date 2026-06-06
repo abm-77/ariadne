@@ -55,6 +55,9 @@ class WorkflowGraph:
     def _set_producer(self, artifact_id: int, action_call_id: int) -> None:
         self._artifacts[artifact_id]["_producer"] = action_call_id
 
+    def _producer_of(self, artifact_id: int) -> int | None:
+        return self._artifacts[artifact_id].get("_producer")
+
     def _add_consequence(self, name: str, kind_str: str, requires_approval: bool) -> int:
         for i, e in enumerate(self._consequences):
             if e["name"] == name:

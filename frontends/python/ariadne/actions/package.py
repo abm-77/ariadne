@@ -16,3 +16,9 @@ def publish(
 ) -> SemanticImpl:
     """Publish a package to a registry."""
     return semantic("package.publish", registry=registry, dist=dist, tag=tag)
+
+
+def install(package: str, using: str | None = None) -> SemanticImpl:
+    """Install a package via the selected manager (pip/cargo/apt/...). `package`
+    may be a registry name or a local path (e.g. `dist/*.whl`)."""
+    return semantic("package.install", using=using, package=package)

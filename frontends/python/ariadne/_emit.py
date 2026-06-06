@@ -19,7 +19,7 @@ def _clean_artifact(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _clean_action_call(rec: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"name": rec["name"], "action": rec["action"]}
-    for key in ("inputs", "outputs", "consequences", "secrets", "actor_constraints"):
+    for key in ("inputs", "outputs", "after", "consequences", "secrets", "actor_constraints"):
         val = rec.get(key)
         if val:
             out[key] = val
