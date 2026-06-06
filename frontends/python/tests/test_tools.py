@@ -155,9 +155,9 @@ class TestSemanticActions:
     def test_artifact_handle_arg_becomes_name(self):
         from ariadne._handle import ArtifactHandle
 
-        h = ArtifactHandle(0, "checkout/src")
+        h = ArtifactHandle(0, "checkout-src")
         impl = scan.sbom(image=h)
-        assert impl.to_tir()["args"]["image"] == "checkout/src"
+        assert impl.to_tir()["args"]["image"] == "checkout-src"
 
     def test_semantic_action_emits_in_workflow(self):
         @action(outputs={"src": SourceTree})

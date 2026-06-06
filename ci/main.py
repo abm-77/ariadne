@@ -59,15 +59,15 @@ def main_ci():
 @test_case(name="runs only on push to main")
 def push_main_only():
     # plan-level: docs and coverage artifacts are produced for both languages.
-    expect.artifact_produced("rust_docs/docs")
-    expect.artifact_produced("python_docs/docs")
-    expect.artifact_produced("rust_coverage/coverage")
-    expect.artifact_produced("python_coverage/coverage")
+    expect.artifact_produced("rust_docs-docs")
+    expect.artifact_produced("python_docs-docs")
+    expect.artifact_produced("rust_coverage-coverage")
+    expect.artifact_produced("python_coverage-coverage")
 
 
 @test_case(name="profile is refreshed each run")
 def profile_refreshed():
-    expect.artifact_produced("refresh_profile/profile")
+    expect.artifact_produced("refresh_profile-profile")
 
 
 def main():

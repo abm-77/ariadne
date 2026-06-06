@@ -83,7 +83,7 @@ def checkout_emits_native_action():
 
 @test_case
 def binary_path():
-    expect.artifact_path("build_bin/bin", "target/release/app")
+    expect.artifact_path("build_bin-bin", "target/release/app")
 
 
 @test_case(event=event.pull_request(fork=True))
@@ -112,7 +112,7 @@ class TestRunner:
     def test_failing_assertion_is_reported(self):
         @test_case
         def wrong_path():
-            expect.artifact_path("build_bin/bin", "nope/wrong")
+            expect.artifact_path("build_bin-bin", "nope/wrong")
 
         results = Pipeline(_release_workflow()).run_tests(wrong_path)
         assert not results.passed

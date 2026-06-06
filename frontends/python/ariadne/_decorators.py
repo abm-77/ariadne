@@ -120,7 +120,10 @@ class ActionDef:
 
         output_handles: dict[str, ArtifactHandle] = {}
         for out_name, out_spec in self.outputs.items():
-            art_name = f"{self.name}/{out_name}"
+            # `action-artifact`: a single token, valid on every backend (GitHub's
+            # upload-artifact rejects '/'). The names themselves are left as the
+            # author wrote them; '-' is just the separator.
+            art_name = f"{self.name}-{out_name}"
             if isinstance(out_spec, OutputDecl):
                 ty_tir = _type_to_tir(out_spec.ty)
                 path = out_spec.path_hint()

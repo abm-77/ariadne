@@ -22,10 +22,10 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
     - name: Run rust_docs
       run: cargo doc --no-deps --workspace
-    - name: Upload artifact rust_docs/docs
+    - name: Upload artifact rust_docs-docs
       uses: actions/upload-artifact@v4
       with:
-        name: rust_docs/docs
+        name: rust_docs-docs
         path: target/doc
         retention-days: '1'
   rust-coverage:
@@ -39,10 +39,10 @@ jobs:
       run: cargo install cargo-llvm-cov
     - name: Run rust_coverage
       run: cargo llvm-cov --workspace --lcov --output-path lcov.info
-    - name: Upload artifact rust_coverage/coverage
+    - name: Upload artifact rust_coverage-coverage
       uses: actions/upload-artifact@v4
       with:
-        name: rust_coverage/coverage
+        name: rust_coverage-coverage
         path: lcov.info
         retention-days: '1'
   python-fmt:
@@ -69,10 +69,10 @@ jobs:
         ./target/release/loom profile github --workflow main.yml --runs 20 --out profile.json
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Upload artifact refresh_profile/profile
+    - name: Upload artifact refresh_profile-profile
       uses: actions/upload-artifact@v4
       with:
-        name: refresh_profile/profile
+        name: refresh_profile-profile
         path: profile.json
         retention-days: '30'
   test-workspace:
@@ -86,10 +86,10 @@ jobs:
       run: cargo build --release --package loom
     - name: Run test_workspace
       run: cargo test --workspace -- --test-threads=4
-    - name: Upload artifact test_workspace/report
+    - name: Upload artifact test_workspace-report
       uses: actions/upload-artifact@v4
       with:
-        name: test_workspace/report
+        name: test_workspace-report
         path: test-results.xml
         retention-days: '1'
   build-wheel:
@@ -109,10 +109,10 @@ jobs:
       run: cargo build --lib --release --package ariadne-py
     - name: Run build_wheel
       run: maturin build --release --manifest-path crates/ariadne-py/Cargo.toml --out dist
-    - name: Upload artifact build_wheel/wheel
+    - name: Upload artifact build_wheel-wheel
       uses: actions/upload-artifact@v4
       with:
-        name: build_wheel/wheel
+        name: build_wheel-wheel
         path: dist/*.whl
         retention-days: '1'
   test-wheel:
@@ -124,16 +124,16 @@ jobs:
       uses: actions/checkout@v4
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
-    - name: Download artifact build_wheel/wheel
+    - name: Download artifact build_wheel-wheel
       uses: actions/download-artifact@v4
       with:
-        name: build_wheel/wheel
+        name: build_wheel-wheel
     - name: Run test_wheel
       run: cargo test -v
-    - name: Upload artifact test_wheel/report
+    - name: Upload artifact test_wheel-report
       uses: actions/upload-artifact@v4
       with:
-        name: test_wheel/report
+        name: test_wheel-report
         path: py-test-results.xml
         retention-days: '1'
   python-docs:
@@ -149,16 +149,16 @@ jobs:
         python-version: '3.12'
     - name: Install dependencies
       run: pip install pdoc
-    - name: Download artifact build_wheel/wheel
+    - name: Download artifact build_wheel-wheel
       uses: actions/download-artifact@v4
       with:
-        name: build_wheel/wheel
+        name: build_wheel-wheel
     - name: Run python_docs
       run: pdoc -o frontends/python/docs ariadne
-    - name: Upload artifact python_docs/docs
+    - name: Upload artifact python_docs-docs
       uses: actions/upload-artifact@v4
       with:
-        name: python_docs/docs
+        name: python_docs-docs
         path: frontends/python/docs
         retention-days: '1'
   python-coverage:
@@ -176,15 +176,15 @@ jobs:
       run: |-
         pip install pytest
         pip install pytest-cov
-    - name: Download artifact build_wheel/wheel
+    - name: Download artifact build_wheel-wheel
       uses: actions/download-artifact@v4
       with:
-        name: build_wheel/wheel
+        name: build_wheel-wheel
     - name: Run python_coverage
       run: pytest frontends/python/tests --cov=ariadne --cov-report=xml:py-coverage.xml
-    - name: Upload artifact python_coverage/coverage
+    - name: Upload artifact python_coverage-coverage
       uses: actions/upload-artifact@v4
       with:
-        name: python_coverage/coverage
+        name: python_coverage-coverage
         path: py-coverage.xml
         retention-days: '1'
