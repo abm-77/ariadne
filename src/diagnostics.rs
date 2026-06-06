@@ -23,6 +23,7 @@ pub enum DiagCode {
     ActionPortMismatch,
     UnknownSemanticOp,
     NoCompatibleImplementation,
+    AmbiguousImplementation,
     UnsatisfiableResources,
 }
 
@@ -43,6 +44,7 @@ impl std::fmt::Display for DiagCode {
             Self::ActionPortMismatch => "ActionPortMismatch",
             Self::UnknownSemanticOp => "UnknownSemanticOp",
             Self::NoCompatibleImplementation => "NoCompatibleImplementation",
+            Self::AmbiguousImplementation => "AmbiguousImplementation",
             Self::UnsatisfiableResources => "UnsatisfiableResources",
         };
         write!(f, "{s}")

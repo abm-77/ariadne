@@ -288,7 +288,7 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
 
     let mut unit_id_for_action: HashMap<ActionCallId, Ustr> = HashMap::new();
     let mut units: Vec<ExecutionUnit> = Vec::new();
-    let diagnostics: Vec<Diagnostic> = Vec::new();
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let lowering_registry = crate::lowering::Registry::builtin();
     // Shared dependency table, populated as lowerings are selected; units only
     // hold tool names that reference it. Each tool resolves (once) to its install
@@ -412,6 +412,8 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
                 &prefer,
             ) {
                 Ok(sel) => {
+                    // Surface non-fatal selection warnings (e.g. ambiguous impl).
+                    diagnostics.extend(sel.warnings.iter().cloned());
                     // The toolchain the chosen implementation runs on (e.g. cargo
                     // -> rust), provisioned per job from the inventory's version.
                     if let Some(tc) = crate::toolchain::toolchain_for_impl(&sel.implementation) {

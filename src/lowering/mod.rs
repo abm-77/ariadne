@@ -123,6 +123,9 @@ pub struct Selection {
     /// Names of tools the chosen implementation needs (resolved against the
     /// `dependency` store for install-on-start emission).
     pub dependencies: Vec<String>,
+    /// Non-fatal diagnostics from selection (e.g. an ambiguous implementation
+    /// the planner should surface).
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// A collection of lowering definitions, keyed by semantic action. This is the
@@ -212,6 +215,7 @@ impl Registry {
                 realization: realize((def.build)(args)),
                 reason: format!("call pins implementation '{want}' for {action}"),
                 dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
+                warnings: Vec::new(),
             });
         }
         let preferred = |impl_id: &str| {
@@ -268,6 +272,7 @@ impl Registry {
                     realization: realize((def.build)(args)),
                     reason: format!("scope prefers '{want}' for {action}"),
                     dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
+                    warnings: Vec::new(),
                 });
             }
         }
@@ -287,12 +292,37 @@ impl Registry {
             ),
         };
 
+        // Ambiguity: several candidates tie at the chosen priority, so the pick
+        // came down to stability/registration order. Warn so the author pins it.
+        let chosen = priority(def);
+        let mut tied: Vec<&str> = eligible
+            .iter()
+            .filter(|d| priority(d) == chosen)
+            .map(|d| d.implementation)
+            .collect();
+        tied.sort();
+        tied.dedup();
+        let warnings = if tied.len() > 1 {
+            vec![Diagnostic::warning(
+                DiagCode::AmbiguousImplementation,
+                format!(
+                    "ambiguous implementation for '{action}': {} apply equally; selected \
+                     '{}'. Disambiguate with using=, an impls() block, or inventory prefer/deny.",
+                    tied.join(", "),
+                    def.implementation
+                ),
+            )]
+        } else {
+            Vec::new()
+        };
+
         Ok(Selection {
             lowering_id: def.id.to_string(),
             implementation: def.implementation.to_string(),
             realization: realize((def.build)(args)),
             reason: format!("selected lowering '{}': {why}", def.id),
             dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
+            warnings,
         })
     }
 }
@@ -424,6 +454,20 @@ mod tests {
 
     fn reg() -> Registry {
         Registry::builtin()
+    }
+
+    #[test]
+    fn ambiguous_selection_warns_but_pin_is_silent() {
+        // fmt.check has cargo + ruff; with no pin/prefer/inventory they tie.
+        let amb = reg().select("fmt.check", &Args::new(), None, &[]).unwrap();
+        assert!(amb.warnings.iter().any(|w| w.code == DiagCode::AmbiguousImplementation));
+        // A pin (or a single candidate) resolves it: no warning.
+        let pinned = reg()
+            .select_using("fmt.check", &Args::new(), None, &[], Some("ruff"), &[])
+            .unwrap();
+        assert!(pinned.warnings.is_empty());
+        let single = reg().select("scm.checkout", &Args::new(), None, &[]).unwrap();
+        assert!(single.warnings.is_empty());
     }
 
     #[test]
