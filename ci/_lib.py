@@ -1,0 +1,152 @@
+"""Reusable CI building blocks: a shared inventory, semantic action definitions,
+and composite builders that the per-workflow scripts (build-ariadne, build-python)
+and the main-branch CI compose. Reuse happens at the authoring layer.
+
+Everything is a semantic action; the runner/tool for each is selected from the
+inventory, disambiguated by `impls([...])` blocks. All produced artifacts carry
+a 1-day retention for now.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "frontends", "python"))
+
+from ariadne import action, shell, Inventory, scm, build, test, fmt, docs, coverage, impls
+from ariadne.artifacts import SourceTree, Binary, Wheel, TestReport, CoverageData, DocsSite, ProfileData
+
+LIFETIME = "1d"
+# Profiles persist longer than build artifacts so the next generation can fetch them.
+PROFILE_LIFETIME = "30d"
+
+
+def write_workflow(pipeline, filename: str, backend: str = "github", level: int = 2, profile=None) -> None:
+    """Compile a pipeline to a backend config and write it under .github/workflows/.
+    `profile` (dict or JSON str) guides the cost model when planning."""
+    yaml = pipeline.compile(backend=backend, level=level, profile=profile)
+    out = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", filename)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w") as f:
+        f.write(yaml)
+    print(f"wrote {out}")
+
+
+def inventory() -> Inventory:
+    """The execution resources and implementation technologies CI may use."""
+    return (
+        Inventory("ariadne-ci")
+        .actor("runner", selector=["ubuntu-latest"], capabilities=["linux", "x86_64"])
+        .use("git")
+        .use("rust", channel="stable")
+        .use("cargo")
+        .use("python", version="3.12")
+        .use("maturin")
+        .use("ruff")
+        .use("pdoc")
+        .use("pytest")
+    )
+
+
+@action(outputs={"src": SourceTree})
+def checkout():
+    return scm.checkout()
+
+
+@action(outputs={"loom": Binary.file("target/release/loom", lifetime=LIFETIME)})
+def build_loom(src: SourceTree):
+    return build.binary(src=src, package="loom", release=True)
+
+
+@action(outputs={"report": TestReport.file("test-results.xml", lifetime=LIFETIME)})
+def test_workspace(src: SourceTree, loom: Binary):
+    return test.unit(args=["--workspace", "--", "--test-threads=4"])
+
+
+@action(outputs={})
+def rust_fmt(src: SourceTree):
+    return fmt.check()
+
+
+@action(outputs={"docs": DocsSite.dir("target/doc", lifetime=LIFETIME)})
+def rust_docs(src: SourceTree):
+    return docs.generate()
+
+
+@action(outputs={"coverage": CoverageData.file("lcov.info", lifetime=LIFETIME)})
+def rust_coverage(src: SourceTree):
+    return coverage.measure(out="lcov.info")
+
+
+def ariadne_build_and_test(src):
+    """Reusable: build the loom binary and run the Rust workspace tests."""
+    with impls(["cargo"]):
+        loom = build_loom(src)
+        test_workspace(src, loom)
+    return loom
+
+
+@action(outputs={"ext": Binary.file("target/release/libariadne_core.so", lifetime=LIFETIME)})
+def build_core_ext(src: SourceTree):
+    """Compile the PyO3 native extension (cdylib). Its compiled `.so` is the
+    payload the wheel packages, so the wheel build depends on this artifact."""
+    return build.library(package="ariadne-py", release=True)
+
+
+@action(outputs={"wheel": Wheel.glob("dist/*.whl", lifetime=LIFETIME)})
+def build_wheel(src: SourceTree, ext: Binary):
+    return build.python_wheel(
+        src=src,
+        package="ariadne",
+        manifest="crates/ariadne-py/Cargo.toml",
+        release=True,
+        out="dist",
+    )
+
+
+@action(outputs={"report": TestReport.file("py-test-results.xml", lifetime=LIFETIME)})
+def test_wheel(src: SourceTree, wheel: Wheel):
+    return test.unit(paths=["frontends/python/tests/"], args=["-v"])
+
+
+@action(outputs={})
+def python_fmt(src: SourceTree):
+    return fmt.check(paths=["frontends/python"])
+
+
+@action(outputs={"docs": DocsSite.dir("frontends/python/docs", lifetime=LIFETIME)})
+def python_docs(src: SourceTree, wheel: Wheel):
+    return docs.generate(package="ariadne", out="frontends/python/docs")
+
+
+@action(outputs={"coverage": CoverageData.file("py-coverage.xml", lifetime=LIFETIME)})
+def python_coverage(src: SourceTree, wheel: Wheel):
+    return coverage.measure(
+        paths=["frontends/python/tests"], package="ariadne", out="py-coverage.xml"
+    )
+
+
+def python_build_and_test(src):
+    """Reusable: compile the native extension, package it into the ariadne wheel,
+    and run the Python frontend tests. One `impls` block binds cargo (the cdylib),
+    maturin (the wheel) and pytest (the tests); each applies where it has a
+    lowering. The `.so` flows from build_core_ext into build_wheel."""
+    with impls(["cargo", "maturin", "pytest"]):
+        ext = build_core_ext(src)
+        wheel = build_wheel(src, ext)
+        test_wheel(src, wheel)
+    return wheel
+
+
+@action(outputs={"profile": ProfileData.file("profile.json", lifetime=PROFILE_LIFETIME)})
+def refresh_profile(src: SourceTree):
+    """Close the profile-guided loop: aggregate recent main-branch runs into a
+    fresh profile.json (durations, sizes, setup/queue, runner cost) and upload
+    it. Re-running the CI generators with this profile self-tunes future plans.
+
+    This is CI tooling (the `loom profile` collector), so it uses the shell
+    escape hatch; `gh` authenticates with the workflow's GITHUB_TOKEN."""
+    return shell(
+        "cargo build --release -p loom\n"
+        "./target/release/loom profile github --workflow main.yml --runs 20 --out profile.json",
+        env={"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"},
+    )

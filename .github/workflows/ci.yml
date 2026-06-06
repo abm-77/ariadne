@@ -1,0 +1,45 @@
+# Repository correctness gate. Hand-written on purpose: this must run the full
+# test sweep even when a change breaks the workflow generator, so it does not
+# depend on Ariadne emitting it. The generated build-*.yml workflows are product
+# demos of Ariadne; this is the gate that keeps the tree green.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # --workspace is load-bearing: plain `cargo test` only tests the root
+      # `ariadne` package and skips the loom and ariadne-py crates.
+      - name: cargo test (workspace)
+        run: cargo test --workspace --locked
+      - name: loom binary builds
+        run: cargo build --locked -p loom
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install build tooling
+        run: pip install maturin pytest
+      # Build the ariadne extension wheel and install it, then run the frontend
+      # test suite against the installed package.
+      - name: build + install ariadne wheel
+        run: |
+          cd frontends/python
+          maturin build --release --out dist
+          pip install dist/*.whl
+      - name: pytest (python frontend)
+        run: cd frontends/python && pytest tests/ -q
