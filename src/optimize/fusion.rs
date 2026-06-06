@@ -36,6 +36,8 @@ impl Pass for FusionPass {
                 }
             }
             merge_unique(&mut consumer.secrets, &producer.secrets);
+            merge_unique(&mut consumer.dependencies, &producer.dependencies);
+            merge_unique(&mut consumer.toolchains, &producer.toolchains);
 
             decisions.push(OptimizationDecision {
                 pass: "fusion".into(),
@@ -163,7 +165,7 @@ mod tests {
     /// prep -> build, both pure, same actor: a fusible chain.
     fn chain_wf() -> Workflow {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo prep");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
@@ -191,7 +193,7 @@ mod tests {
         // it. prep's output feeds only build, so prep fuses into build. The fused
         // job must download src once, not once per fused half.
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let mid = b.artifact("mid", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let co = b.shell_action("checkout", "checkout", &[], &[src], "git");
@@ -219,7 +221,7 @@ mod tests {
     #[test]
     fn different_runners_not_fused() {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
@@ -234,7 +236,7 @@ mod tests {
     #[test]
     fn effectful_producer_not_fused() {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
@@ -251,7 +253,7 @@ mod tests {
     fn shared_producer_not_fused() {
         // prep feeds two consumers → fusing would duplicate prep.
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let b1 = b.artifact("b1", ArtifactType::Binary);
         let b2 = b.artifact("b2", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo");

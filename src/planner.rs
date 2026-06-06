@@ -139,6 +139,13 @@ pub struct ExecutionUnit {
     pub timeout: Option<String>,
     /// Action-level concurrency control, if declared.
     pub coordination: Option<ir::Coordination>,
+    /// Names of tools the unit's actions need, referencing `Plan::dependencies`
+    /// for the install command. Backends may install them on job start when the
+    /// workflow opts in; otherwise the env provides them.
+    pub dependencies: Vec<Ustr>,
+    /// Language toolchains the unit needs (e.g. "rust", "python"), referencing
+    /// `Plan::toolchains` for the version. Backends provision them per job.
+    pub toolchains: Vec<Ustr>,
 }
 
 /// A recorded optimization decision, filled by the optimize phase and surfaced
@@ -172,6 +179,15 @@ pub struct Plan {
     pub triggers: Vec<ir::Trigger>,
     /// Workflow-level concurrency control, if declared.
     pub coordination: Option<ir::Coordination>,
+    /// Shared dependency table: tool name -> resolved install command (from the
+    /// `package.install` lowering). Units reference it by tool name
+    /// (`ExecutionUnit::dependencies`) so a tool used by many jobs is stored once.
+    pub dependencies: std::collections::BTreeMap<String, String>,
+    /// Shared toolchain table: toolchain name -> version/channel (from the
+    /// inventory's `.use`). Units reference it by name (`ExecutionUnit::toolchains`).
+    pub toolchains: std::collections::BTreeMap<String, Option<String>>,
+    /// Whether backends should install each unit's dependencies on job start.
+    pub install_dependencies: bool,
 }
 
 impl Plan {
@@ -235,13 +251,50 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
     let mut units: Vec<ExecutionUnit> = Vec::new();
     let diagnostics: Vec<Diagnostic> = Vec::new();
     let lowering_registry = crate::lowering::Registry::builtin();
+    // Shared dependency table, populated as lowerings are selected; units only
+    // hold tool names that reference it. Each tool resolves (once) to its install
+    // command via the `package.install` lowerings, so the manager (pip/apt/...)
+    // is chosen by the same selection machinery as any action.
+    let dep_store = crate::dependency::DependencyRegistry::builtin();
+    let mut dep_table: BTreeMap<String, String> = BTreeMap::new();
+    // Toolchains needed across the plan, with versions read from the inventory.
+    let mut tc_table: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let inv_version = |tc: &str| -> Option<String> {
+        workflow.inventory.as_ref().and_then(|i| {
+            i.implementations.iter().find(|m| m.id.as_str() == tc).and_then(|m| m.version.map(|v| v.to_string()))
+        })
+    };
+
+    let is_source = |art_id: ir::ArtifactId| {
+        matches!(workflow.artifact(art_id).ty, ir::ArtifactType::SourceTree)
+    };
 
     for action_id in topo {
         let action = workflow.action_call(action_id);
+
+        let op_def = workflow.find_action_def(action.action.as_str());
+        let is_checkout = action.action.as_str() == "checkout"
+            || action.action.as_str() == "scm.checkout"
+            || op_def.is_some_and(|d| {
+                d.implementations.iter().any(|i| matches!(i, ir::Implementation::Checkout))
+            });
+
+        // A pure source-acquisition action (checkout producing only a SourceTree)
+        // is not its own job: SourceTree is ambient, reacquired per job via
+        // checkout rather than shipped as an artifact. Skip it; consumers
+        // self-checkout below. This is the always-correct realization — a working
+        // tree cannot be meaningfully copied as a named artifact, but checkout
+        // reproduces it anywhere.
+        if is_checkout && action.outputs.iter().all(|&o| is_source(o)) {
+            continue;
+        }
+
         let unit_id = Ustr::from(sanitize_id(&action.name).as_str());
         unit_id_for_action.insert(action_id, unit_id);
 
+        // Depend only on producers of non-source inputs; source is self-acquired.
         let mut needs: Vec<Ustr> = action.inputs.iter()
+            .filter(|&&art_id| !is_source(art_id))
             .filter_map(|&art_id| workflow.artifact(art_id).producer)
             .filter(|&pred| pred != action_id)
             .filter_map(|pred| unit_id_for_action.get(&pred).copied())
@@ -252,22 +305,21 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
 
         let mut ops: Vec<LogicalOp> = Vec::new();
 
-        // Baseline placement is always copy (upload/download) — the legal
-        // fallback. The placement optimization pass upgrades to mount/colocation
-        // when a backend and actors support it.
+        // A SourceTree input means "this job needs the repo": acquire it in place
+        // with a checkout step (rendered as actions/checkout on GitHub), never a
+        // download. Non-source inputs use the copy baseline (upload/download) —
+        // the legal fallback the placement pass may later upgrade to a mount.
+        let needs_source = action.inputs.iter().any(|&id| is_source(id));
+        if needs_source {
+            ops.push(LogicalOp::CheckoutRepo);
+        }
         for &in_id in &action.inputs {
             let art = workflow.artifact(in_id);
-            if art.producer.is_none() || art.producer == Some(action_id) {
+            if art.producer.is_none() || art.producer == Some(action_id) || is_source(in_id) {
                 continue;
             }
             ops.push(LogicalOp::DownloadArtifact { name: art.name, path: art.path.clone() });
         }
-
-        let op_def = workflow.find_action_def(action.action.as_str());
-        let is_checkout = action.action.as_str() == "checkout"
-            || op_def.is_some_and(|d| {
-                d.implementations.iter().any(|i| matches!(i, ir::Implementation::Checkout))
-            });
 
         // A semantic action defers its concrete realization to backend-agnostic
         // lowering: the inventory's available implementations decide which tool
@@ -279,21 +331,64 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
             _ => None,
         }));
 
+        let mut dependencies: Vec<Ustr> = Vec::new();
+        let mut toolchains: Vec<Ustr> = Vec::new();
         if let Some((op, args, using, prefer)) = semantic {
             let caps: Vec<crate::select::Capability> = actor_for(action, workflow)
                 .map(|a| a.capabilities.iter().map(crate::select::Capability::new).collect())
                 .unwrap_or_default();
             match lowering_registry.select_using(&op, &args, workflow.inventory.as_ref(), &caps, using.as_deref(), &prefer) {
-                Ok(sel) => match sel.realization {
-                    crate::lowering::Realization::Shell(script) => ops.push(LogicalOp::RunShell {
-                        label: action.name,
-                        script,
-                        env: Default::default(),
-                    }),
-                    crate::lowering::Realization::Native { id, args, fallback } => {
-                        ops.push(LogicalOp::Native { id: Ustr::from(&id), args, fallback })
+                Ok(sel) => {
+                    // The toolchain the chosen implementation runs on (e.g. cargo
+                    // -> rust), provisioned per job from the inventory's version.
+                    if let Some(tc) = crate::toolchain::toolchain_for_impl(&sel.implementation) {
+                        tc_table.entry(tc.to_string()).or_insert_with(|| inv_version(tc));
+                        let tc = Ustr::from(tc);
+                        if !toolchains.contains(&tc) {
+                            toolchains.push(tc);
+                        }
                     }
-                },
+                    // Record each tool in the shared table once: resolve it to a
+                    // package, then lower `package.install` to the install command
+                    // (manager pinned for language packages, selected for system).
+                    for tool_name in &sel.dependencies {
+                        if !dep_table.contains_key(tool_name) {
+                            let pref = dep_store.resolve(tool_name);
+                            // A language package pins its manager (pip/cargo/...);
+                            // a system package uses the actor's system manager,
+                            // dnf if the inventory declares it, otherwise apt.
+                            let manager = pref.manager.clone()
+                                .unwrap_or_else(|| system_manager(workflow.inventory.as_ref()));
+                            let mut iargs = crate::lowering::Args::new();
+                            iargs.insert("package".into(), serde_json::Value::String(pref.package.clone()));
+                            if let Ok(install) = lowering_registry.select_using(
+                                "package.install", &iargs, workflow.inventory.as_ref(), &[],
+                                Some(&manager), &[],
+                            ) {
+                                let cmd = match install.realization {
+                                    crate::lowering::Realization::Shell(c) => c,
+                                    crate::lowering::Realization::Native { fallback, .. } => fallback,
+                                };
+                                dep_table.insert(tool_name.clone(), cmd);
+                            }
+                        }
+                        let tool = Ustr::from(tool_name);
+                        if !dependencies.contains(&tool) {
+                            dependencies.push(tool);
+                        }
+                    }
+                    dependencies.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+                    match sel.realization {
+                        crate::lowering::Realization::Shell(script) => ops.push(LogicalOp::RunShell {
+                            label: action.name,
+                            script,
+                            env: Default::default(),
+                        }),
+                        crate::lowering::Realization::Native { id, args, fallback } => {
+                            ops.push(LogicalOp::Native { id: Ustr::from(&id), args, fallback })
+                        }
+                    }
+                }
                 Err(d) => return Err(vec![d]),
             }
         } else if is_checkout {
@@ -313,6 +408,9 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
         }
 
         for &out_id in &action.outputs {
+            if is_source(out_id) {
+                continue; // SourceTree is reacquired, never uploaded.
+            }
             let out = workflow.artifact(out_id);
             ops.push(LogicalOp::UploadArtifact {
                 name: out.name,
@@ -355,6 +453,8 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
             actor_capabilities,
             timeout: action.timeout.clone(),
             coordination: action.coordination.clone(),
+            dependencies,
+            toolchains,
         });
     }
 
@@ -375,11 +475,21 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
         impl_capabilities,
         triggers: workflow.triggers.clone(),
         coordination: workflow.coordination.clone(),
+        dependencies: dep_table,
+        toolchains: tc_table,
+        install_dependencies: workflow.policies.install_dependencies,
     })
 }
 
 fn sanitize_id(name: &str) -> String {
     name.to_lowercase().replace([' ', '_'], "-")
+}
+
+/// The system package manager for installing system dependencies: dnf when the
+/// inventory declares it available, otherwise apt (the common-runner default).
+fn system_manager(inv: Option<&ir::Inventory>) -> String {
+    let has = |id: &str| inv.is_some_and(|i| i.implementations.iter().any(|m| m.id == id && !m.deny));
+    if has("dnf") { "dnf".into() } else { "apt".into() }
 }
 
 pub(crate) fn actor_for<'a>(action: &ActionCall, workflow: &'a Workflow) -> Option<&'a Actor> {
@@ -473,8 +583,9 @@ mod tests {
     fn producer_ordered_before_consumer() {
         let plan = plan(&simple_workflow()).unwrap();
         let pos = |name: &str| plan.units.iter().position(|u| u.action_name == name).unwrap();
-        assert!(pos("checkout") < pos("build"));
         assert!(pos("build") < pos("test"));
+        // checkout is not a job: source is reacquired per job, not shipped.
+        assert!(plan.units.iter().all(|u| u.action_name != "checkout"));
     }
 
     #[test]
@@ -503,10 +614,14 @@ mod tests {
     }
 
     #[test]
-    fn checkout_op_emits_checkout_repo_physical_op() {
+    fn source_consumer_checks_out_in_place() {
         let plan = plan(&simple_workflow()).unwrap();
-        let checkout = plan.units.iter().find(|u| u.action_name == "checkout").unwrap();
-        assert!(checkout.ops.iter().any(|op| matches!(op, LogicalOp::CheckoutRepo)));
+        // No standalone checkout job; the job that needs source checks out itself.
+        assert!(plan.units.iter().all(|u| u.action_name != "checkout"));
+        let build = plan.units.iter().find(|u| u.action_name == "build").unwrap();
+        assert!(build.ops.iter().any(|op| matches!(op, LogicalOp::CheckoutRepo)));
+        // SourceTree is never transferred.
+        assert!(!build.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
     }
 
     #[test]
@@ -519,9 +634,10 @@ mod tests {
     #[test]
     fn cross_unit_artifact_uses_copy_without_placement() {
         let plan = plan(&simple_workflow()).unwrap();
-        let build = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-        assert!(build.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
-        assert!(!build.ops.iter().any(|op| matches!(op, LogicalOp::TransferArtifact { .. })));
+        // The binary flows build -> test by copy; test downloads it.
+        let test = plan.units.iter().find(|u| u.action_name == "test").unwrap();
+        assert!(test.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
+        assert!(!test.ops.iter().any(|op| matches!(op, LogicalOp::TransferArtifact { .. })));
     }
 
     #[test]
@@ -532,16 +648,17 @@ mod tests {
         let mut b = WorkflowBuilder::new("mounted");
         let src = b.artifact("source", ArtifactType::SourceTree);
         let bin = b.artifact("binary", ArtifactType::Binary);
-        let checkout = b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
+        let rep = b.artifact("rep", ArtifactType::TestReport);
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
+        let test = b.shell_action("test", "test", &[bin], &[rep], "make test");
         let gpu = b.actor("big", &["self-hosted"], &["mount"]);
-        b.constrain_actor(checkout, gpu);
         b.constrain_actor(build, gpu);
-        b.place(src, PlacementStrategy::SharedVolume { path: "/vol".into() });
+        b.constrain_actor(test, gpu);
+        b.place(bin, PlacementStrategy::SharedVolume { path: "/vol".into() });
         let plan = plan(&b.build()).unwrap();
-        let build_unit = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-        assert!(build_unit.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
-        assert!(!build_unit.ops.iter().any(|op| matches!(op, LogicalOp::TransferArtifact { .. })));
+        let test_unit = plan.units.iter().find(|u| u.action_name == "test").unwrap();
+        assert!(test_unit.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
+        assert!(!test_unit.ops.iter().any(|op| matches!(op, LogicalOp::TransferArtifact { .. })));
     }
 
     #[test]

@@ -118,6 +118,16 @@ fn merged(plan: &Plan, i: usize, j: usize) -> Plan {
             host.secrets.push(s);
         }
     }
+    for d in donor.dependencies {
+        if !host.dependencies.contains(&d) {
+            host.dependencies.push(d);
+        }
+    }
+    for t in donor.toolchains {
+        if !host.toolchains.contains(&t) {
+            host.toolchains.push(t);
+        }
+    }
     host.action_name = Ustr::from(&format!("{}+{}", host.action_name, donor.action_name));
 
     let donor_id = donor.id;
@@ -165,7 +175,7 @@ mod tests {
     /// CSE leaves them alone and only sibling fusion can pack them.
     fn fan_out(n: usize) -> Workflow {
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         b.shell_action("checkout", "checkout", &[], &[src], "co");
         for i in 0..n {
             let out = b.artifact(&format!("o{i}"), ArtifactType::Binary);
@@ -216,7 +226,7 @@ mod tests {
         // Dollars-first would tempt packing, but a unit carrying an effect is not
         // pure and must stay its own job (its order must be preservable).
         let mut b = WorkflowBuilder::new("w");
-        let src = b.artifact("src", ArtifactType::SourceTree);
+        let src = b.artifact("src", ArtifactType::Binary);
         let o1 = b.artifact("o1", ArtifactType::Binary);
         let o2 = b.artifact("o2", ArtifactType::Binary);
         b.shell_action("checkout", "checkout", &[], &[src], "co");

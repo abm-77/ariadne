@@ -5,6 +5,8 @@ pub mod select;
 pub mod validate;
 pub mod analysis;
 pub mod profile;
+pub mod dependency;
+pub mod toolchain;
 pub mod cost;
 pub mod lowering;
 pub mod planner;
