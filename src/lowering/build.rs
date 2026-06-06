@@ -23,11 +23,11 @@ pub fn register(r: &mut Registry) {
         p.push("--out".into());
         p.push(arg_str(a, "out").unwrap_or_else(|| "dist".into()));
         container("ghcr.io/pyo3/maturin:latest", p)
-    }));
+    }).with_deps(&["maturin"]));
     r.register(def("build.python_wheel.uv", "build.python_wheel", "uv", |a| {
         let out = arg_str(a, "out").unwrap_or_else(|| "dist".into());
         local(vec!["uv".into(), "build".into(), "--wheel".into(), "--out-dir".into(), out])
-    }));
+    }).with_deps(&["uv"]));
     r.register(def("build.python_wheel.python-build", "build.python_wheel", "python", |a| {
         let out = arg_str(a, "out").unwrap_or_else(|| "dist".into());
         local(vec!["python".into(), "-m".into(), "build".into(), "--wheel".into(), "--outdir".into(), out])

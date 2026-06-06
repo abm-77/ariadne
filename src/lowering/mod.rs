@@ -66,8 +66,20 @@ pub struct LoweringDef {
     pub implementation: &'static str,
     /// Hard actor-capability gates (e.g. "docker"). Empty for most built-ins.
     pub requirements: Vec<Capability>,
+    /// Names of tools this implementation needs (e.g. "maturin"). How each
+    /// installs is defined once in the `dependency` store, not here. Assumed
+    /// provided unless the workflow opts into installing dependencies.
+    pub dependencies: Vec<&'static str>,
     pub stability: Stability,
     pub build: fn(&Args) -> LoweringBody,
+}
+
+impl LoweringDef {
+    /// Declare the tools this implementation needs, by name.
+    pub(crate) fn with_deps(mut self, tools: &[&'static str]) -> Self {
+        self.dependencies = tools.to_vec();
+        self
+    }
 }
 
 impl Candidate for LoweringDef {
@@ -94,6 +106,9 @@ pub struct Selection {
     pub implementation: String,
     pub realization: Realization,
     pub reason: String,
+    /// Names of tools the chosen implementation needs (resolved against the
+    /// `dependency` store for install-on-start emission).
+    pub dependencies: Vec<String>,
 }
 
 /// A collection of lowering definitions, keyed by semantic action. This is the
@@ -180,6 +195,7 @@ impl Registry {
                 implementation: def.implementation.to_string(),
                 realization: realize((def.build)(args)),
                 reason: format!("call pins implementation '{want}' for {action}"),
+                dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
             });
         }
         let preferred = |impl_id: &str| {
@@ -221,6 +237,7 @@ impl Registry {
                     implementation: def.implementation.to_string(),
                     realization: realize((def.build)(args)),
                     reason: format!("scope prefers '{want}' for {action}"),
+                    dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
                 });
             }
         }
@@ -239,6 +256,7 @@ impl Registry {
             implementation: def.implementation.to_string(),
             realization: realize((def.build)(args)),
             reason: format!("selected lowering '{}': {why}", def.id),
+            dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
         })
     }
 }
@@ -314,6 +332,7 @@ pub(crate) fn def(
         action,
         implementation,
         requirements: vec![],
+        dependencies: vec![],
         stability: Stability::Stable,
         build,
     }
@@ -341,6 +360,29 @@ mod tests {
 
     fn reg() -> Registry {
         Registry::builtin()
+    }
+
+    #[test]
+    fn package_install_lowers_per_manager() {
+        // Each manager produces its ecosystem's install command. The planner
+        // pins the manager (language packages directly, system packages via the
+        // actor's system manager), so we exercise the pinned lowerings here.
+        let mut a = Args::new();
+        a.insert("package".into(), json!("maturin"));
+        let pip = reg().select_using("package.install", &a, None, &[], Some("pip"), &[]).unwrap();
+        assert!(matches!(pip.realization, Realization::Shell(s) if s == "pip install maturin"));
+
+        let mut g = Args::new();
+        g.insert("package".into(), json!("git"));
+        let apt = reg().select_using("package.install", &g, None, &[], Some("apt"), &[]).unwrap();
+        assert!(matches!(apt.realization, Realization::Shell(s) if s == "sudo apt-get install -y git"));
+        let dnf = reg().select_using("package.install", &g, None, &[], Some("dnf"), &[]).unwrap();
+        assert!(matches!(dnf.realization, Realization::Shell(s) if s == "sudo dnf install -y git"));
+
+        let mut c = Args::new();
+        c.insert("package".into(), json!("cargo-llvm-cov"));
+        let cargo = reg().select_using("package.install", &c, None, &[], Some("cargo"), &[]).unwrap();
+        assert!(matches!(cargo.realization, Realization::Shell(s) if s == "cargo install cargo-llvm-cov"));
     }
 
     #[test]
@@ -422,6 +464,7 @@ mod tests {
             action: "build.container_image",
             implementation: "docker",
             requirements: vec![Capability::new("docker")],
+            dependencies: vec![],
             stability: Stability::Stable,
             build: |_| local(vec!["docker".into(), "build".into()]),
         });
@@ -512,6 +555,7 @@ mod tests {
             action: "build.python_wheel",
             implementation: "company-wheel-builder",
             requirements: vec![],
+            dependencies: vec![],
             stability: Stability::Stable,
             build: |a| container(
                 "registry.company.com/build/python-wheel:latest",

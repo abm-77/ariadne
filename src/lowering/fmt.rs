@@ -9,5 +9,5 @@ pub fn register(r: &mut Registry) {
         let mut p = vec!["ruff".into(), "format".into(), "--check".into()];
         p.extend(arg_list(a, "paths"));
         local(p)
-    }));
+    }).with_deps(&["ruff"]));
 }

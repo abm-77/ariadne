@@ -8,7 +8,7 @@ pub fn register(r: &mut Registry) {
             "cargo".into(), "llvm-cov".into(), "--workspace".into(),
             "--lcov".into(), "--output-path".into(), out,
         ])
-    }));
+    }).with_deps(&["cargo-llvm-cov"]));
     r.register(def("coverage.measure.pytest", "coverage.measure", "pytest", |a| {
         let mut p = vec!["pytest".into()];
         p.extend(arg_list(a, "paths"));
@@ -18,5 +18,5 @@ pub fn register(r: &mut Registry) {
         let out = arg_str(a, "out").unwrap_or_else(|| "coverage.xml".into());
         p.push(format!("--cov-report=xml:{out}"));
         local(p)
-    }));
+    }).with_deps(&["pytest", "pytest-cov"]));
 }

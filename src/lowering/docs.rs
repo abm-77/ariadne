@@ -9,9 +9,9 @@ pub fn register(r: &mut Registry) {
         let out = arg_str(a, "out").unwrap_or_else(|| "docs".into());
         let pkg = arg_str(a, "package").unwrap_or_default();
         local(vec!["pdoc".into(), "-o".into(), out, pkg])
-    }));
+    }).with_deps(&["pdoc"]));
     r.register(def("docs.generate.mkdocs", "docs.generate", "mkdocs", |a| {
         let site = arg_str(a, "out").unwrap_or_else(|| "site".into());
         local(vec!["mkdocs".into(), "build".into(), "--site-dir".into(), site])
-    }));
+    }).with_deps(&["mkdocs"]));
 }

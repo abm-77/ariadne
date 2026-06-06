@@ -22,6 +22,6 @@ pub fn register(r: &mut Registry) {
             p.extend(arg_list(a, "paths"));
             p.extend(arg_list(a, "args"));
             local(p)
-        }));
+        }).with_deps(&["pytest"]));
     }
 }
