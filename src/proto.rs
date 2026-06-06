@@ -770,6 +770,9 @@ fn action_from(m: &wire::ActionCall) -> ir::ActionCall {
         action: Ustr::from(m.op.as_str()),
         inputs: m.inputs.iter().map(|&i| ir::ArtifactId(i)).collect(),
         outputs: m.outputs.iter().map(|&i| ir::ArtifactId(i)).collect(),
+        // Explicit ordering edges are not carried on the binary wire; JSON TIR
+        // carries them via serde.
+        after: vec![],
         consequences: m
             .consequences
             .iter()

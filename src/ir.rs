@@ -284,6 +284,10 @@ pub struct ActionCall {
     pub inputs: Vec<ArtifactId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<ArtifactId>,
+    /// Explicit ordering edges with no data flow: action-call indices this call
+    /// must run after (e.g. tests gated on a formatting check).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<ActionCallId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub consequences: Vec<ConsequenceId>,
     /// Secrets this action needs. How they are consumed is up to the selected
@@ -572,6 +576,7 @@ impl WorkflowBuilder {
             action: action_def.into(),
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
+            after: vec![],
             consequences: vec![],
             secrets: vec![],
             actor_constraints: vec![],
