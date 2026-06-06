@@ -10,7 +10,7 @@ Ariadne separates workflow semantics from execution strategy.
 
 Users describe artifacts, actions, effects, constraints, and policies. Ariadne generates a correct execution plan, optimizes artifact movement and runner placement, supports local execution, explains decisions, and emits standard CI configurations.
 
-Loom is the reference frontend and CLI.
+The Python package `ariadne` is the reference authoring frontend; Loom is the CLI over Thread IR.
 
 ---
 
@@ -63,32 +63,33 @@ Ariadne compiles onto existing CI/CD infrastructure.
 
 ### Ariadne
 
-The core planning engine.
+The core planning engine, and the Python authoring frontend (package `ariadne`).
 
 Ariadne owns:
 
-- Thread IR validation
+- Thread IR and its validation
+- the Inventory (actors, placements, implementations)
+- action and implementation definitions
+- lowering definitions (implementation selection)
 - type/effect analysis
-- placement planning
-- actor selection
-- optimization
+- placement planning and actor selection
+- optimization and profile-guided planning
+- instruction selection and backend emission
 - diagnostics
-- profile-guided planning
-- backend emission
 
 ### Loom
 
-The reference frontend and CLI.
+The CLI over Thread IR. Loom consumes the Thread IR that Ariadne produces and exposes the
+developer commands:
 
-Loom owns:
+- `loom check`
+- `loom plan`
+- `loom test`
+- `loom explain`
+- `loom docs`
 
-- workflow authoring
-- Python APIs
-- developer ergonomics
-- local commands
-- Thread IR generation
-
-Ariadne can be used without Loom.
+Lowering and selection are part of Ariadne's planning model, not Loom's command model. Ariadne
+can be used without Loom (any frontend that emits Thread IR works).
 
 ---
 
@@ -126,6 +127,11 @@ Thread IR has five first-class concepts:
 - Placement
 - Actor
 
+Actions are authored as semantic intent. Actors and Placements, together with the available
+implementation technologies, are declared in the Inventory (see below). Execution concerns
+(triggers, coordination, timeouts, resource requirements, artifact lifetimes) are modeled
+explicitly too; see Execution Semantics.
+
 ---
 
 ## Artifact
@@ -158,20 +164,40 @@ Artifacts are not merely files. They may have multiple physical representations.
 
 ## Action
 
-Actions are computation.
+Actions are computation. They consume artifacts, produce artifacts, and may emit effects.
 
-Examples:
+Actions are authored as **semantic intent**, never as tool invocations. A workflow says
+*build a Python wheel*, not *run maturin*. The frontend exposes semantic namespaces:
 
-- checkout
-- build
-- test
-- scan
-- package
-- sign
-- release
-- deploy
+```text
+scm.checkout(...)
 
-Actions consume artifacts, produce artifacts, and may emit effects.
+build.binary(...)
+build.library(...)
+build.python_wheel(...)
+build.container_image(...)
+build.docs(...)
+
+test.unit(...)
+test.integration(...)
+
+scan.sbom(...)
+scan.vulnerability(...)
+
+sign.artifact(...)
+
+package.publish(...)
+
+forge.github(...)
+```
+
+Each call records a semantic operation in Thread IR (an `Implementation::Semantic { op, args }`)
+with no command baked in. Which concrete tool realizes it is decided later, by Ariadne, from
+the inventory (see Inventory and Selection Model below).
+
+An escape hatch remains for tool-specific or backend-native work: `container(image).exec(...)`
+and `shell(...)` declare an explicit implementation directly. The compiler only trusts what the
+action declares (inputs, outputs, effects).
 
 ---
 
@@ -248,6 +274,101 @@ Actors expose capabilities:
 
 Ariadne assigns actions to actors. It does not provision actors.
 
+Actors are declared in the **Inventory** (below), not inline in the workflow body.
+
+---
+
+## Inventory
+
+The Inventory describes the resources and technologies available to a workflow. It is
+embedded in Thread IR so planning is self-contained, and it owns:
+
+- **Actors** - what can execute work.
+- **Placement providers** - where artifacts can live and how they can be accessed.
+- **Implementations** - which technologies are available to realize semantic actions.
+
+```python
+inventory = (
+    Inventory("ci")
+    .actor("runner", selector=["ubuntu-latest"], capabilities=["linux", "x86_64"])
+    .placement("cache", kind="cache_volume", access_modes=["mount_ro", "mount_rw"])
+    .use("git")
+    .use("cargo")
+    .use("maturin")
+    .prefer("buildkit")
+    .deny("docker")
+)
+```
+
+An **Implementation** is an available realization technology (git, cargo, maturin, uv, pip,
+cmake, buildkit, docker, podman, gh, syft, cosign, twine, ...). It is not a workflow action.
+The inventory declares which ones exist; `prefer` biases selection toward one; `deny` excludes
+one. The inventory never names lowerings directly.
+
+Design split:
+
+```text
+Workflow author   chooses semantic actions
+Inventory author  chooses available implementations
+Lowering author   teaches Ariadne how an implementation realizes an action
+```
+
+---
+
+## Selection Model: Lowerings and Instructions
+
+Going from semantic intent to backend config is two selection phases of one pattern. Both are
+*capability-gated, ranked, explainable rule resolution* over a registry, and both run on a
+single shared engine (`src/select.rs`): `Capability`, `Stability`, a `Candidate` trait, a
+generic `Registry<C>` (storage + by-key index), and `resolve(candidates, available, priority)`
+(filter to candidates whose required capabilities are all available, then pick the best by
+`(priority, stability)`, ties broken by registration order).
+
+```text
+Semantic action
+    ↓   implementation selection  (plan-time, backend-agnostic)   src/lowering/
+Portable LogicalOp
+    ↓   instruction selection     (emit-time, backend-aware)      src/backends/<b>/instructions.rs
+Native backend step
+```
+
+### Implementation selection (lowering)
+
+A `LoweringDef { id, action, implementation, requires, stability, build }` teaches Ariadne how
+one implementation realizes one semantic action; its `build` produces a structured, inspectable
+`LoweringBody` (no DSL). Lowerings live in an extensible `Registry` (`src/lowering/`, one pack
+module per class: scm, build, test, scan, sign, package, forge). Built-in packs register
+defaults; callers and future distributable packs may register more.
+
+Selection consults the inventory: `deny` excludes; `prefer` then `use` then undeclared-default
+sets the rank (so a silent inventory still yields a working default, preserving correctness).
+The result is a **portable** `LogicalOp` - the plan never contains a backend-specific step.
+
+The same `test.unit()` lowers to `cargo test` under an inventory with `use("cargo")` and to
+`pytest` under one with `use("pytest")`. Same intent, different lowering, decided here.
+
+### Instruction selection (emission)
+
+Each backend owns a `Catalogue` of `Instruction`s. The `Selector` matches a `LogicalOp` against
+it (by op name, plus capability gates) and renders the native step: `CheckoutRepo` becomes
+`uses: actions/checkout@v4` on GitHub, `git checkout` on local.
+
+### Native steps and the portability invariant
+
+Some realizations are backend-specific (a GitHub `uses:` action like
+`pypa/gh-action-pypi-publish`). These are never chosen at plan time. A lowering emits a portable
+`LogicalOp::Native { id, args, fallback }` carrying a shell `fallback`; the backend catalogue may
+*upgrade* it to a native step when the inventory permits (inventory implementations surface as
+`impl.<id>` capabilities; the upgrade entry requires that capability), and any backend lacking
+the upgrade runs the fallback. Checkout is just an instance: fallback `git checkout .`, upgraded
+to `actions/checkout@v4` on GitHub. This keeps the plan portable and a legal plan always
+available, exactly as the correctness invariant requires.
+
+The two containers are the same type: `lowering::Registry = select::Registry<LoweringDef>` and
+`backends::Catalogue = select::Registry<Instruction>`. The phases differ only in what
+capabilities are in scope and what a rule produces. One model, run twice over a growing
+capability set.
+
 ---
 
 ## Graph Model
@@ -265,6 +386,58 @@ Action executes on Actor
 ```
 
 Execution is derived from artifact flow.
+
+---
+
+## Execution Semantics
+
+Several execution concerns are workflow semantics, modeled explicitly in Thread
+IR rather than buried in backend configuration.
+
+### Triggers
+
+How a workflow is entered (`Workflow.triggers`). A trigger controls workflow
+entry; it is distinct from a condition (which controls execution after entry)
+and from the `EventContext` the planner uses to gate consequences. Types:
+pull_request, push (optional branches), tag (pattern), schedule (cron), manual.
+Authored with the `on` namespace; the GitHub backend builds the `on:` block
+(push branches/tags, `schedule:`, `workflow_dispatch:`) from them, defaulting to
+push+PR when none are declared.
+
+### Coordination
+
+Concurrency control (`Coordination { group, cancel_in_progress }`), at the
+workflow level (`Workflow.coordination`) and the action level
+(`ActionCall.coordination`). Exclusive means one run in the group at a time
+(queue); cancel-previous cancels an in-progress run. Lowers to backend-native
+mechanisms: GitHub `concurrency:` (top-level and per-job), GitLab resource
+groups, local locks.
+
+### Timeouts
+
+Maximum execution duration per action (`ActionCall.timeout`, e.g. "30m"). A
+backend-independent execution requirement; GitHub emits `timeout-minutes`.
+Retries are intentionally NOT modeled: a failed job is re-run through whatever
+frontend the user already has, and retrying effectful actions is unsafe.
+
+### Resource Requirements
+
+What an action needs to execute (`ActionCall.resources`: cpu, memory, disk,
+gpu) and what an actor advertises (`Actor.resources`). Resources participate in
+*actor selection*: an action is assignable to an actor only if the actor
+satisfies every requirement (memory/disk compared as byte sizes). Validation
+rejects a workflow whose action requires resources no actor can satisfy.
+Resources are not emitted directly; they constrain which actor, and therefore
+which runner, is chosen.
+
+### Artifact Lifetime
+
+How long an artifact is retained (`Artifact.lifetime`): a category (ephemeral,
+workflow, release, permanent) or a duration ("14d", "12h"). This is a retention
+requirement, distinct from placement persistence (a storage capability). The
+GitHub backend maps it to `retention-days` (whole days, 1..90); sub-day
+durations round up to the 1-day minimum. Lifetime is intended to influence
+placement selection where placement providers advertise supported retention.
 
 ---
 
@@ -326,6 +499,10 @@ Self-hosted:
 ```
 
 The same Thread IR can compile differently depending on backend capabilities.
+
+Capabilities are the common currency of both selection phases (see Selection Model): backend
+features, actor abilities, and inventory implementations (`impl.<id>`) all surface as
+capabilities, and a rule is eligible only when every capability it requires is available.
 
 ---
 
@@ -888,6 +1065,12 @@ Bindings should expose:
 
 Bindings should not expose unstable compiler internals.
 
+The reference frontend is the Python package `ariadne`
+(`frontends/python/ariadne/`); it authors Thread IR from semantic actions and an inventory,
+then drives the engine in-process through the `ariadne.ariadne_core` PyO3 extension
+(`crates/ariadne-py`). `loom` is the CLI binary (`crates/loom`), not the Python package. Both
+are thin: the engine runs in-process and operates on Thread IR.
+
 ---
 
 ## Rust Architecture
@@ -911,46 +1094,55 @@ The hard problem is domain planning, not machine-code lowering.
 
 ## Workspace Layout
 
+The engine is ONE library crate (`ariadne`, a module per phase); the CLI and the Python
+extension are thin binaries over it. The phases are not shipped as separate crates.
+
 ```text
+ariadne/                 root lib crate
+  src/
+    ir.rs                semantic IR types + WorkflowBuilder (source of truth)
+    proto.rs             TIR serialization (prost wire types + serde JSON codec)
+    diagnostics.rs
+    select.rs            shared selection substrate:
+                           Capability, Stability, Candidate, Registry<C>, resolve
+    validate.rs
+    lowering/            implementation selection (plan-time, backend-agnostic)
+      mod.rs               Registry = select::Registry<LoweringDef>, LoweringBody, select
+      scm.rs build.rs test.rs scan.rs sign.rs package.rs forge.rs   built-in packs
+    planner.rs           Plan + LogicalOp (incl. Native); runs lowering selection
+    cost.rs profile.rs analysis.rs optimize/   optional optimization
+    backends/
+      mod.rs             Backend trait; Catalogue = select::Registry<Instruction>; Selector
+      renderers.rs       backend-agnostic YAML/Bash renderers
+      github/            GitHub Actions backend (+ instructions.rs catalogue)
+      local/             local Podman backend + executor (loom test)
 crates/
-
-thread-ir
-thread-ir-serde
-
-diagnostics
-validate
-analysis
-planner
-profile
-
-backends
-backend-github
-backend-local
-
-ariadne
-
-loom
+  loom/                  CLI binary over Thread IR
+  ariadne-py/            PyO3 extension; builds as module ariadne.ariadne_core
+frontends/
+  python/ariadne/        Python authoring frontend (semantic actions + Inventory)
 ```
 
-Dependency flow:
+Logical layering (modules flow inward to outward), with `select` as the shared base both
+selection sites stand on:
 
 ```text
-thread-ir
-    ↑
-diagnostics
-    ↑
-validate
-    ↑
-analysis
+ir            select
+    ↑           ↑
+diagnostics     │
+    ↑           │
+validate        │
+    ↑           │
+lowering  ──────┘   (implementation selection)
     ↑
 planner
     ↑
-backends
+backends  (instruction selection, also on select)
     ↑
-ariadne
-    ↑
-loom
+loom / ariadne-py
 ```
+
+`ir` must not depend on planner, backends, or filesystem/Docker code.
 
 ---
 

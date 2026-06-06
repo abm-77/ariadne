@@ -2,6 +2,12 @@
 
 This file gives Claude Code project-specific guidance for working on Ariadne and Loom.
 
+## General Rules
+- Never commit or push without explicit permission.
+- Prioritize separation of concerns. I.e., TIR is backend-agnostic, it should not depend on any backend implementation details, that's what context-aware lowering is for. 
+  Apply this broadly.
+- Test everything we add.
+
 ## Project Summary
 
 Ariadne is a CI/CD workflow planning engine written in Rust.
@@ -200,7 +206,10 @@ Use these names consistently.
 
 
 ## Code Style 
-- Do not use section header comments like // ---- TITLE ----, or any variation of 
+- Do not use section header comments like // ---- TITLE ----, or any variation of including:
+// ---------------------------------------------------------------------------
+// Object-safe trait for registry and CLI use
+// ---------------------------------------------------------------------------
 - Keep comments to at most 4 lines, if you can't explain it in that, you're being too verbose.
 - Do not use file-level comments explaining what a file does.
 - Do not, under any circumstance, use an em-dash.
