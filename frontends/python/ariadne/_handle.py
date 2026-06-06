@@ -3,6 +3,7 @@ from __future__ import annotations
 
 class ArtifactHandle:
     """Symbolic reference to an artifact in the workflow graph."""
+
     __slots__ = ("_id", "_name")
 
     def __init__(self, id_: int, name: str):
@@ -23,6 +24,7 @@ class ArtifactHandle:
 
 class ActorHandle:
     """Symbolic reference to an actor in the workflow graph."""
+
     __slots__ = ("_id", "_name")
 
     def __init__(self, id_: int, name: str):

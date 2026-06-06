@@ -3,19 +3,19 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "thread"
+name = "ariadne"
 version = "0.1.0"
 description = "Python frontend for Thread IR (Ariadne)"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "ruff>=0.4"]
 
 [tool.maturin]
 # Build the ariadne-py Rust extension as part of this package.
 manifest-path = "../../crates/ariadne-py/Cargo.toml"
-module-name = "thread.ariadne_core"
+module-name = "ariadne.ariadne_core"
 python-source = "."
 features = []
 

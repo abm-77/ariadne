@@ -1,26 +1,34 @@
 """Tests for the in-process Pipeline binding (ariadne_core)."""
+
 import json
 import pytest
 
-from thread import (
-    op, workflow, artifact, actor, shell,
-    SourceTree, Binary, TestReport,
-    Effect, EffectKind,
+from ariadne import (
+    action,
+    workflow,
+    artifact,
+    actor,
+    shell,
+    SourceTree,
+    Binary,
+    TestReport,
+    Consequence,
+    ConsequenceKind,
     Pipeline,
 )
 
 
-@op(outputs={"src": SourceTree})
+@action(outputs={"src": SourceTree})
 def checkout():
     return shell("git checkout .")
 
 
-@op(outputs={"binary": Binary})
+@action(outputs={"binary": Binary})
 def build(src: SourceTree):
     return shell("cargo build --release")
 
 
-@op(outputs={"report": TestReport})
+@action(outputs={"report": TestReport})
 def run_tests(binary: Binary):
     return shell("cargo test")
 
@@ -45,9 +53,8 @@ class TestValidate:
     def test_has_errors_false_for_valid_workflow(self):
         assert not Pipeline(simple_graph()).has_errors()
 
-    def test_op_type_mismatch_caught(self):
-        # build expects SourceTree but we pass Binary
-        @op(outputs={"binary": Binary})
+    def test_action_type_mismatch_caught(self):
+        @action(outputs={"binary": Binary})
         def wrong_build(binary: Binary):
             return shell("cargo build")
 
@@ -56,25 +63,26 @@ class TestValidate:
             actor("r", labels=["ubuntu"])
             src = checkout()
             binary = build(src)
-            wrong_build(binary)  # OK - Binary in, Binary out, op def has Binary input
+            wrong_build(binary)
 
-        # Construct a workflow where the declared port type doesn't match the artifact type.
-        # Since the Python frontend builds artifacts with correct types, we test via raw JSON.
-        import ariadne_core
+        from ariadne import ariadne_core
+
         tir = json.loads(simple_graph().emit_json())
-        # Corrupt: swap artifact types so the op definition check fires.
-        # The simple graph has no op_definitions yet for these ops, so we need
-        # to inject one manually.
-        tir["op_definitions"] = [{
-            "id": "build",
-            "inputs": [{"name": "src", "ty": "Wheel", "kind": "artifact"}],  # wrong: expects Wheel
-            "outputs": [{"name": "binary", "ty": "Binary", "kind": "artifact"}],
-        }]
+        tir["action_defs"] = [
+            {
+                "id": "build",
+                "inputs": [
+                    {"name": "src", "ty": "Wheel", "kind": "artifact"}
+                ],
+                "outputs": [{"name": "binary", "ty": "Binary", "kind": "artifact"}],
+            }
+        ]
         p = ariadne_core.Pipeline(json.dumps(tir))
         all_diags = p.validate()
         errs = [d for d in all_diags if "[error]" in d]
-        assert any("TypeMismatch" in e or "OpPortMismatch" in e or "Wheel" in e for e in errs), \
+        assert any("TypeMismatch" in e or "ActionPortMismatch" in e or "Wheel" in e for e in errs), (
             f"Expected type mismatch error, got: {all_diags}"
+        )
 
 
 class TestPlan:
@@ -96,7 +104,6 @@ class TestPlan:
     def test_plan_max_concurrency(self):
         p = Pipeline(simple_graph())
         plan = p.plan()
-        # Linear pipeline has concurrency 1 (baseline).
         assert plan.max_concurrency() >= 1
 
 
@@ -117,7 +124,6 @@ class TestOptimize:
         p = Pipeline(simple_graph())
         plan = p.plan()
         opt = p.optimize(plan, backend="github", level=2)
-        # Decisions may be empty for a simple linear workflow with no placements.
         assert isinstance(opt.optimizations(), list)
 
     def test_unknown_backend_raises(self):
@@ -160,47 +166,48 @@ class TestCompile:
         assert "cargo build" in bash
 
 
-class TestOpDefinitions:
-    def test_op_definitions_emitted(self):
+class TestActionDefs:
+    def test_action_defs_emitted(self):
         g = simple_graph()
         tir = json.loads(g.emit_json())
-        assert "op_definitions" in tir
-        ids = [d["id"] for d in tir["op_definitions"]]
+        assert "action_defs" in tir
+        ids = [d["id"] for d in tir["action_defs"]]
         assert "checkout" in ids
         assert "build" in ids
         assert "run_tests" in ids
 
-    def test_op_definition_has_ports(self):
+    def test_action_def_has_ports(self):
         g = simple_graph()
         tir = json.loads(g.emit_json())
-        build_def = next(d for d in tir["op_definitions"] if d["id"] == "build")
+        build_def = next(d for d in tir["action_defs"] if d["id"] == "build")
         assert any(p["name"] == "src" for p in build_def.get("inputs", []))
         assert any(p["name"] == "binary" for p in build_def.get("outputs", []))
 
-    def test_op_definition_has_implementation(self):
+    def test_action_def_has_implementation(self):
         g = simple_graph()
         tir = json.loads(g.emit_json())
-        build_def = next(d for d in tir["op_definitions"] if d["id"] == "build")
+        build_def = next(d for d in tir["action_defs"] if d["id"] == "build")
         impls = build_def.get("implementations", [])
         assert len(impls) > 0
         assert "cargo build" in impls[0].get("run", "")
 
-    def test_op_definition_deduped(self):
+    def test_action_def_deduped(self):
         @workflow
         def ci():
             actor("r", labels=["ubuntu"])
             src = checkout()
             build(src)
-            build(src)  # second call to same op
+            build(src)
 
         tir = json.loads(ci().emit_json())
-        build_defs = [d for d in tir.get("op_definitions", []) if d["id"] == "build"]
+        build_defs = [d for d in tir.get("action_defs", []) if d["id"] == "build"]
         assert len(build_defs) == 1
 
-    def test_loom_accepts_tir_with_op_definitions(self, loom_bin):
+    def test_loom_accepts_tir_with_action_defs(self, loom_bin):
         if loom_bin is None:
             pytest.skip("loom binary not found")
         import subprocess, tempfile, os
+
         g = simple_graph()
         with tempfile.NamedTemporaryFile(suffix=".tir.json", mode="w", delete=False) as f:
             f.write(g.emit_json())
@@ -215,6 +222,7 @@ class TestOpDefinitions:
 @pytest.fixture
 def loom_bin():
     import os
+
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     for rel in ("target/release/loom", "target/debug/loom"):
         path = os.path.join(repo_root, rel)
