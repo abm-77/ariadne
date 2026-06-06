@@ -1,17 +1,3 @@
-"""Main-branch CI: runs on push to main. Formats, builds, tests, docs, and
-covers BOTH the Rust engine and the Python frontend, then uploads the artifacts.
-
-Architecture is expressed as intent, not jobs:
-  * Testing is gated on formatting via explicit `after=` edges (fmt -> the rest).
-  * Each job provisions its own toolchain + tools (install_dependencies).
-  * The cost model + sibling fusion auto-group independent same-toolchain actions
-    onto one runner (shared build), so Rust compiles once and the python checks
-    share one wheel install. This needs a cost-leaning objective + runner pricing.
-
-It also refreshes the optimizer profile from recent runs (the profile-guided
-loop): a committed profile.json plans this run; refresh_profile re-collects one.
-"""
-
 import json
 import os
 import sys
@@ -32,6 +18,7 @@ from _lib import (
     python_docs,
     python_coverage,
     refresh_profile,
+    commit_profile,
 )
 from ariadne import (
     workflow,
@@ -69,22 +56,16 @@ def main_ci():
     objectives("dollar_cost", "critical_path")
     src = checkout()
 
-    # Formatting checks first; the barrier gates everything below on them, so no
-    # build/test runs until the tree is formatted.
     rust_fmt(src)
     python_fmt(src)
     barrier()
 
-    # Rust: fusion groups build/test/docs/coverage onto one runner.
     with impls(["cargo"]):
         loom = build_loom(src)
         test_workspace(src, loom)
         rust_docs(src)
         rust_coverage(src)
 
-    # Python: build the wheel, install it, then exercise it. The checks take the
-    # installed environment as input (so `ariadne` imports); fusion colocates the
-    # install with them.
     with impls(["maturin", "ruff", "pdoc", "pytest"]):
         wheel = build_wheel(src)
         env = install_wheel(src, wheel)
@@ -92,8 +73,10 @@ def main_ci():
         python_docs(src, env)
         python_coverage(src, env)
 
-    # Re-collect the optimizer profile from recent runs and upload it.
-    refresh_profile(src)
+    # Re-collect the optimizer profile from recent runs and commit it back so the
+    # next generation plans with real timings (fusion colocates collect + commit).
+    profile = refresh_profile(src)
+    commit_profile(src, profile)
 
 
 @test_case(name="docs and coverage are produced for both languages")
@@ -119,7 +102,6 @@ def main():
 
     profile = load_profile()
 
-    # Ships at -O3 (fusion enabled); plan with the profile and test that level.
     results = pipeline.run_tests(
         artifacts_produced,
         profile_refreshed,

@@ -16,6 +16,7 @@ from ariadne import (
     action,
     shell,
     Inventory,
+    ConsequenceKind,
     scm,
     build,
     test,
@@ -46,9 +47,7 @@ def write_workflow(
     """Compile a pipeline to a backend config and write it under .github/workflows/.
     `profile` (dict or JSON str) guides the cost model when planning."""
     yaml = pipeline.compile(backend=backend, level=level, profile=profile)
-    out = os.path.join(
-        os.path.dirname(__file__), "..", ".github", "workflows", filename
-    )
+    out = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", filename)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         f.write(yaml)
@@ -105,9 +104,7 @@ def rust_coverage(src: SourceTree):
 def build_wheel(src: SourceTree):
     # Build from the frontend's pyproject (python-source + the ariadne_core
     # extension) so the wheel is the importable `ariadne` package.
-    return build.python_wheel(
-        src=src, dir="frontends/python", out="../../dist", release=True
-    )
+    return build.python_wheel(src=src, dir="frontends/python", out="../../dist", release=True)
 
 
 @action(outputs={"env": Wheel})
@@ -140,18 +137,25 @@ def python_coverage(src: SourceTree, env: Wheel):
     )
 
 
-@action(
-    outputs={"profile": ProfileData.file("profile.json", lifetime=PROFILE_LIFETIME)}
-)
+@action(outputs={"profile": ProfileData.file("profile.json", lifetime=PROFILE_LIFETIME)})
 def refresh_profile(src: SourceTree):
-    """Close the profile-guided loop: aggregate recent main-branch runs into a
-    fresh profile.json (durations, sizes, setup/queue, runner cost) and upload
-    it. Re-running the CI generators with this profile self-tunes future plans.
-
-    This is CI tooling (the `loom profile` collector), so it uses the shell
-    escape hatch; `gh` authenticates with the workflow's GITHUB_TOKEN."""
+    """Aggregate recent main-branch runs into a fresh profile.json (durations,
+    sizes, setup/queue, runner cost). CI tooling (the `loom profile` collector),
+    so it uses the shell escape hatch; `gh` authenticates with GITHUB_TOKEN."""
     return shell(
         "cargo build --release -p loom\n"
         "./target/release/loom profile github --workflow main.yml --runs 20 --out profile.json",
         env={"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"},
+    )
+
+
+@action(outputs={}, consequences=[ConsequenceKind.GitWrite])
+def commit_profile(src: SourceTree, profile: ProfileData):
+    """Commit the refreshed profile back so the next generation plans with real
+    timings (closing the loop). The GitWrite consequence makes the backend grant
+    `contents: write`; `[skip ci]` keeps the profile commit from retriggering CI."""
+    return scm.commit(
+        paths=["profile.json"],
+        message="[profile] refresh from CI runs [skip ci]",
+        push=True,
     )
