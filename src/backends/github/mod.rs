@@ -315,8 +315,12 @@ fn annotate_fused_jobs(yaml: String, plan: &Plan) -> String {
         .units
         .iter()
         .filter_map(|u| {
-            fused_actions(&u.action_name)
-                .map(|acts| (job_key(&u.action_name), format!("fuses: {}", acts.join(", "))))
+            fused_actions(&u.action_name).map(|acts| {
+                (
+                    job_key(&u.action_name),
+                    format!("fuses: {}", acts.join(", ")),
+                )
+            })
         })
         .collect();
     if comments.is_empty() {
