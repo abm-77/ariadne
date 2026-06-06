@@ -68,8 +68,10 @@ def _release_workflow():
 
 
 @test_case(backend="github")
-def checkout_upgrades_to_native_action():
-    expect.selected_instruction("Native", "github.checkout.native")
+def checkout_emits_native_action():
+    # Source is reacquired per job: the consumer's checkout step renders as the
+    # native actions/checkout, not a download.
+    expect.selected_instruction("CheckoutRepo", "github.checkout.default")
 
 
 @test_case
@@ -92,7 +94,7 @@ def push_fires_deploy():
 class TestRunner:
     def test_plan_level_cases_pass(self):
         results = Pipeline(_release_workflow()).run_tests(
-            checkout_upgrades_to_native_action,
+            checkout_emits_native_action,
             binary_path,
             fork_pr_gates_deploy,
             push_fires_deploy,

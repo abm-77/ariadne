@@ -48,21 +48,22 @@ PROFILE = {"runner_costs": {"ubuntu-latest": 0.01}}
 
 def test_latency_first_keeps_siblings_parallel():
     yaml = Pipeline(_fan_out(cost_first=False)).compile(backend="github", level=3, profile=PROFILE)
-    # checkout + 3 parallel siblings.
-    assert _job_count(yaml) == 4
+    # Three parallel siblings, each self-checking-out (source is ambient, no
+    # checkout job).
+    assert _job_count(yaml) == 3
 
 
 def test_cost_first_packs_siblings():
     latency = Pipeline(_fan_out(cost_first=False)).compile(backend="github", level=3, profile=PROFILE)
     cost = Pipeline(_fan_out(cost_first=True)).compile(backend="github", level=3, profile=PROFILE)
     # Same workflow; only the objective order differs. Dollars-first packs the
-    # three independent siblings onto one job (checkout + one packed job).
+    # three independent siblings onto one job.
     assert _job_count(cost) < _job_count(latency)
-    assert _job_count(cost) == 2
+    assert _job_count(cost) == 1
 
 
 def test_cost_first_without_profile_does_not_pack():
     # With no runner pricing, packing shows no saving the model can see, so it
     # must not trade away parallelism speculatively.
     cost = Pipeline(_fan_out(cost_first=True)).compile(backend="github", level=3)
-    assert _job_count(cost) == 4
+    assert _job_count(cost) == 3

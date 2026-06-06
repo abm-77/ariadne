@@ -23,7 +23,7 @@ from ._graph import WorkflowGraph
 from ._decorators import action, workflow, ActionDef
 from ._impl import container, shell, semantic, impl, impls
 from ._emit import emit_json
-from ._api import artifact, actor, place, max_parallel_jobs, objectives, Placement, Pipeline
+from ._api import artifact, actor, place, max_parallel_jobs, objectives, install_dependencies, Placement, Pipeline
 from .inventory import Inventory
 from .actions import scm, build, test, fmt, docs, coverage, scan, sign, package, forge
 from . import on, coordination, testing
@@ -62,6 +62,7 @@ __all__ = [
     "place",
     "max_parallel_jobs",
     "objectives",
+    "install_dependencies",
     "Placement",
     # implementation descriptors (escape hatch)
     "container",

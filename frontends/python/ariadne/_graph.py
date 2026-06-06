@@ -95,6 +95,9 @@ class WorkflowGraph:
     def _set_objectives(self, objs: list) -> None:
         self._policies["objectives"] = objs
 
+    def _set_install_dependencies(self, enabled: bool) -> None:
+        self._policies["install_dependencies"] = bool(enabled)
+
     def emit_json(self, indent: int = 2) -> str:
         from ._emit import emit_json
 

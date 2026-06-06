@@ -94,7 +94,7 @@ class TestPlan:
     def test_plan_unit_count(self):
         p = Pipeline(simple_graph())
         plan = p.plan()
-        assert plan.unit_count() == 3
+        assert plan.unit_count() == 2
 
     def test_plan_workflow_name(self):
         p = Pipeline(simple_graph())

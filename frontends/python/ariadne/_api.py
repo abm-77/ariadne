@@ -44,6 +44,13 @@ def max_parallel_jobs(n: int) -> None:
     current_graph()._set_max_parallel_jobs(n)
 
 
+def install_dependencies(enabled: bool = True) -> None:
+    """Install each job's declared tool dependencies on job start (e.g. `pip
+    install maturin`). Off by default: the execution environment is assumed to
+    already provide the tools."""
+    current_graph()._set_install_dependencies(enabled)
+
+
 _OBJECTIVES = ("critical_path", "transfer_bytes", "dollar_cost")
 
 

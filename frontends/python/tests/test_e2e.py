@@ -222,17 +222,17 @@ class TestE2EPlan:
     def test_plan_returns_correct_unit_count(self):
         p = Pipeline(build_linear_workflow())
         plan = p.plan()
-        assert plan.unit_count() == 3
+        assert plan.unit_count() == 2
 
     def test_parallel_plan_unit_count(self):
         p = Pipeline(build_parallel_workflow())
         plan = p.plan()
-        assert plan.unit_count() == 4
+        assert plan.unit_count() == 3
 
     def test_release_plan_unit_count(self):
         p = Pipeline(build_release_workflow())
         plan = p.plan()
-        assert plan.unit_count() == 7
+        assert plan.unit_count() == 6
 
     def test_linear_plan_concurrency_is_one(self):
         p = Pipeline(build_linear_workflow())
@@ -409,7 +409,7 @@ class TestE2EConsequences:
         p = Pipeline(build_parallel_workflow())
         assert not p.has_errors()
         plan = p.plan()
-        assert plan.unit_count() == 4
+        assert plan.unit_count() == 3
 
     def test_secrets_in_release_workflow(self):
         tir = json.loads(build_release_workflow().emit_json())
