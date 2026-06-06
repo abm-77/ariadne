@@ -8,5 +8,6 @@ name = "loom"
 path = "src/main.rs"
 
 [dependencies]
-ariadne = { workspace = true }
-clap    = { workspace = true }
+ariadne    = { workspace = true }
+clap       = { workspace = true }
+serde_json = { workspace = true }
