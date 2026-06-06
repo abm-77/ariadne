@@ -13,14 +13,17 @@ pub enum DiagCode {
     TypeMismatch,
     CycleDetected,
     UnknownArtifact,
-    UnknownEffect,
+    UnknownConsequence,
     UnusedInput,
-    EffectRequiresApproval,
+    ConsequenceRequiresApproval,
     BackendCapabilityUnavailable,
     FallbackPlacementSelected,
     IndexOutOfBounds,
-    UnknownOp,
-    OpPortMismatch,
+    UnknownAction,
+    ActionPortMismatch,
+    UnknownSemanticOp,
+    NoCompatibleImplementation,
+    UnsatisfiableResources,
 }
 
 impl std::fmt::Display for DiagCode {
@@ -30,14 +33,17 @@ impl std::fmt::Display for DiagCode {
             Self::TypeMismatch => "TypeMismatch",
             Self::CycleDetected => "CycleDetected",
             Self::UnknownArtifact => "UnknownArtifact",
-            Self::UnknownEffect => "UnknownEffect",
+            Self::UnknownConsequence => "UnknownConsequence",
             Self::UnusedInput => "UnusedInput",
-            Self::EffectRequiresApproval => "EffectRequiresApproval",
+            Self::ConsequenceRequiresApproval => "ConsequenceRequiresApproval",
             Self::BackendCapabilityUnavailable => "BackendCapabilityUnavailable",
             Self::FallbackPlacementSelected => "FallbackPlacementSelected",
             Self::IndexOutOfBounds => "IndexOutOfBounds",
-            Self::UnknownOp => "UnknownOp",
-            Self::OpPortMismatch => "OpPortMismatch",
+            Self::UnknownAction => "UnknownAction",
+            Self::ActionPortMismatch => "ActionPortMismatch",
+            Self::UnknownSemanticOp => "UnknownSemanticOp",
+            Self::NoCompatibleImplementation => "NoCompatibleImplementation",
+            Self::UnsatisfiableResources => "UnsatisfiableResources",
         };
         write!(f, "{s}")
     }
