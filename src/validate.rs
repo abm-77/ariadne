@@ -1,21 +1,21 @@
 use crate::diagnostics::{DiagCode, Diagnostic};
 use std::collections::HashSet;
-use crate::ir::{ActionId, ArtifactId, Workflow};
+use crate::ir::{ActionCallId, ArtifactId, Workflow};
 
 pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     let n_artifacts = workflow.artifacts.len();
-    let n_actions = workflow.actions.len();
-    let n_effects = workflow.effects.len();
+    let n_actions = workflow.action_calls.len();
+    let n_effects = workflow.consequences.len();
 
     // Bounds-check
-    for action in &workflow.actions {
+    for action in &workflow.action_calls {
         for &id in &action.inputs {
             if id.idx() >= n_artifacts {
                 diags.push(Diagnostic::error(
                     DiagCode::IndexOutOfBounds,
-                    format!("Action '{}' references artifact index {} but only {} artifacts exist",
+                    format!("ActionCall '{}' references artifact index {} but only {} artifacts exist",
                         action.name, id.0, n_artifacts),
                 ));
             }
@@ -24,16 +24,16 @@ pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
             if id.idx() >= n_artifacts {
                 diags.push(Diagnostic::error(
                     DiagCode::IndexOutOfBounds,
-                    format!("Action '{}' declares output artifact index {} but only {} artifacts exist",
+                    format!("ActionCall '{}' declares output artifact index {} but only {} artifacts exist",
                         action.name, id.0, n_artifacts),
                 ));
             }
         }
-        for &id in &action.effects {
+        for &id in &action.consequences {
             if id.idx() >= n_effects {
                 diags.push(Diagnostic::error(
-                    DiagCode::UnknownEffect,
-                    format!("Action '{}' references effect index {} but only {} effects exist",
+                    DiagCode::UnknownConsequence,
+                    format!("ActionCall '{}' references effect index {} but only {} effects exist",
                         action.name, id.0, n_effects),
                 ));
             }
@@ -60,7 +60,7 @@ pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
     for (idx, artifact) in workflow.artifacts.iter().enumerate() {
         let art_id = ArtifactId(idx as u32);
         if let Some(producer_id) = artifact.producer {
-            let producer = workflow.action(producer_id);
+            let producer = workflow.action_call(producer_id);
             if !producer.outputs.contains(&art_id) {
                 diags.push(Diagnostic::error(
                     DiagCode::MissingProducer,
@@ -72,21 +72,21 @@ pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
     }
 
     // Each action's output must have its producer field pointing back to this action.
-    for (idx, action) in workflow.actions.iter().enumerate() {
-        let action_id = ActionId(idx as u32);
+    for (idx, action) in workflow.action_calls.iter().enumerate() {
+        let action_id = ActionCallId(idx as u32);
         for &out_id in &action.outputs {
             match workflow.artifact(out_id).producer {
                 Some(p) if p == action_id => {}
                 Some(p) => diags.push(Diagnostic::error(
                     DiagCode::MissingProducer,
-                    format!("Action '{}' lists artifact '{}' as output, but that artifact's producer is '{}'",
+                    format!("ActionCall '{}' lists artifact '{}' as output, but that artifact's producer is '{}'",
                         action.name,
                         workflow.artifact(out_id).name,
-                        workflow.action(p).name),
+                        workflow.action_call(p).name),
                 )),
                 None => diags.push(Diagnostic::error(
                     DiagCode::MissingProducer,
-                    format!("Action '{}' lists artifact '{}' as output, but that artifact has no producer declared",
+                    format!("ActionCall '{}' lists artifact '{}' as output, but that artifact has no producer declared",
                         action.name, workflow.artifact(out_id).name),
                 )),
             }
@@ -94,7 +94,7 @@ pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
     }
 
     // Unused inputs
-    let consumed: HashSet<ArtifactId> = workflow.actions.iter()
+    let consumed: HashSet<ArtifactId> = workflow.action_calls.iter()
         .flat_map(|a| a.inputs.iter().copied())
         .collect();
 
@@ -117,25 +117,40 @@ pub fn validate(workflow: &Workflow) -> Vec<Diagnostic> {
 
     // Op call validation: when an action's op has a definition, check that its
     // input/output artifact types match the declared ports.
-    validate_op_calls(workflow, &mut diags);
+    validate_action_def_calls(workflow, &mut diags);
+
+    // Resource feasibility: an action declaring resource requirements must have
+    // at least one actor in the inventory that can satisfy them.
+    for action in &workflow.action_calls {
+        if let Some(req) = action.resources.as_ref().filter(|r| !r.is_empty())
+            && !workflow.actors().iter().any(|a| a.satisfies(req)) {
+            diags.push(Diagnostic::error(
+                DiagCode::UnsatisfiableResources,
+                format!(
+                    "action '{}' requires resources no actor in the inventory satisfies",
+                    action.name
+                ),
+            ));
+        }
+    }
 
     diags
 }
 
-fn validate_op_calls(workflow: &Workflow, diags: &mut Vec<Diagnostic>) {
+fn validate_action_def_calls(workflow: &Workflow, diags: &mut Vec<Diagnostic>) {
     use crate::ir::PortKind;
 
-    for action in &workflow.actions {
-        let Some(def) = workflow.find_op(action.op.as_str()) else { continue };
+    for action in &workflow.action_calls {
+        let Some(def) = workflow.find_action_def(action.action.as_str()) else { continue };
 
         let art_inputs: Vec<_> = def.inputs.iter().filter(|p| p.kind == PortKind::Artifact).collect();
         let art_outputs: Vec<_> = def.outputs.iter().filter(|p| p.kind == PortKind::Artifact).collect();
 
         if action.inputs.len() != art_inputs.len() {
             diags.push(Diagnostic::error(
-                DiagCode::OpPortMismatch,
+                DiagCode::ActionPortMismatch,
                 format!(
-                    "Action '{}' calls op '{}' with {} artifact input(s) but op declares {}",
+                    "ActionCall '{}' calls op '{}' with {} artifact input(s) but op declares {}",
                     action.name, def.id, action.inputs.len(), art_inputs.len()
                 ),
             ));
@@ -143,9 +158,9 @@ fn validate_op_calls(workflow: &Workflow, diags: &mut Vec<Diagnostic>) {
 
         if action.outputs.len() != art_outputs.len() {
             diags.push(Diagnostic::error(
-                DiagCode::OpPortMismatch,
+                DiagCode::ActionPortMismatch,
                 format!(
-                    "Action '{}' calls op '{}' with {} artifact output(s) but op declares {}",
+                    "ActionCall '{}' calls op '{}' with {} artifact output(s) but op declares {}",
                     action.name, def.id, action.outputs.len(), art_outputs.len()
                 ),
             ));
@@ -159,7 +174,7 @@ fn validate_op_calls(workflow: &Workflow, diags: &mut Vec<Diagnostic>) {
                 diags.push(Diagnostic::error(
                     DiagCode::TypeMismatch,
                     format!(
-                        "Action '{}' passes artifact '{}' (type {}) to port '{}' of op '{}' which expects {}",
+                        "ActionCall '{}' passes artifact '{}' (type {}) to port '{}' of op '{}' which expects {}",
                         action.name, artifact.name, actual, port.name, def.id, port.ty
                     ),
                 ));
@@ -174,7 +189,7 @@ fn validate_op_calls(workflow: &Workflow, diags: &mut Vec<Diagnostic>) {
                 diags.push(Diagnostic::error(
                     DiagCode::TypeMismatch,
                     format!(
-                        "Action '{}' produces artifact '{}' (type {}) for port '{}' of op '{}' which declares {}",
+                        "ActionCall '{}' produces artifact '{}' (type {}) for port '{}' of op '{}' which declares {}",
                         action.name, artifact.name, actual, port.name, def.id, port.ty
                     ),
                 ));
@@ -194,6 +209,9 @@ fn artifact_type_str(ty: &crate::ir::ArtifactType) -> String {
         ArtifactType::Signature => "Signature".into(),
         ArtifactType::ReleaseBundle => "ReleaseBundle".into(),
         ArtifactType::TestReport => "TestReport".into(),
+        ArtifactType::CoverageData => "CoverageData".into(),
+        ArtifactType::DocsSite => "DocsSite".into(),
+        ArtifactType::ProfileData => "ProfileData".into(),
         ArtifactType::Model => "Model".into(),
         ArtifactType::Custom(s) => s.clone(),
     }
@@ -201,15 +219,15 @@ fn artifact_type_str(ty: &crate::ir::ArtifactType) -> String {
 
 fn detect_cycle(workflow: &Workflow) -> Option<String> {
     // deps[action_idx] = indices of actions this action depends on
-    let deps: Vec<Vec<usize>> = workflow.actions.iter().map(|action| {
+    let deps: Vec<Vec<usize>> = workflow.action_calls.iter().map(|action| {
         action.inputs.iter()
             .filter_map(|&art_id| workflow.artifact(art_id).producer)
-            .filter(|&pred| pred.idx() != workflow.actions.iter().position(|a| a.name == action.name).unwrap_or(usize::MAX))
+            .filter(|&pred| pred.idx() != workflow.action_calls.iter().position(|a| a.name == action.name).unwrap_or(usize::MAX))
             .map(|id| id.idx())
             .collect()
     }).collect();
 
-    let n = workflow.actions.len();
+    let n = workflow.action_calls.len();
     let mut visited = vec![false; n];
     let mut in_stack = vec![false; n];
 
@@ -250,6 +268,34 @@ mod tests {
     use crate::diagnostics::Severity;
     use crate::ir::*;
 
+    #[test]
+    fn unsatisfiable_resources_is_an_error() {
+        let mut b = WorkflowBuilder::new("w");
+        let src = b.artifact("src", ArtifactType::SourceTree);
+        let a = b.shell_action("heavy", "heavy", &[], &[src], "make");
+        b.actor("small", &["ubuntu-latest"], &[]);
+        let mut wf = b.build();
+        // Actor advertises nothing; action needs 8 CPU.
+        wf.action_calls[a.idx()].resources =
+            Some(Resources { cpu: Some(8), ..Default::default() });
+        let diags = validate(&wf);
+        assert!(diags.iter().any(|d| d.code == DiagCode::UnsatisfiableResources));
+    }
+
+    #[test]
+    fn satisfiable_resources_validates_clean() {
+        let mut b = WorkflowBuilder::new("w");
+        let src = b.artifact("src", ArtifactType::SourceTree);
+        let a = b.shell_action("heavy", "heavy", &[], &[src], "make");
+        b.actor("big", &["ubuntu-large"], &[]);
+        let mut wf = b.build();
+        wf.inventory.as_mut().unwrap().actors[0].resources =
+            Some(Resources { cpu: Some(16), memory: Some("64Gi".into()), ..Default::default() });
+        wf.action_calls[a.idx()].resources =
+            Some(Resources { cpu: Some(8), memory: Some("32Gi".into()), ..Default::default() });
+        assert!(!validate(&wf).iter().any(|d| d.code == DiagCode::UnsatisfiableResources));
+    }
+
     fn checkout_build_test() -> Workflow {
         let mut b = WorkflowBuilder::new("test");
         let src = b.artifact("source", ArtifactType::SourceTree);
@@ -274,7 +320,7 @@ mod tests {
     fn producer_pointing_to_nonexistent_action_is_error() {
         let mut wf = checkout_build_test();
         // Force artifact 0 to point at an out-of-bounds action index
-        wf.artifacts[0].producer = Some(ActionId(99));
+        wf.artifacts[0].producer = Some(ActionCallId(99));
         let diags = validate(&wf);
         assert!(diags.iter().any(|d| d.code == DiagCode::IndexOutOfBounds));
     }
@@ -284,7 +330,7 @@ mod tests {
         let mut wf = checkout_build_test();
         // artifact 0 (source) correctly points at action 0 (checkout),
         // but now remove source from checkout's outputs → mismatch
-        wf.actions[0].outputs.clear();
+        wf.action_calls[0].outputs.clear();
         let diags = validate(&wf);
         assert!(diags.iter().any(|d| d.code == DiagCode::MissingProducer));
     }
