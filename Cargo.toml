@@ -16,6 +16,7 @@ indexmap   = { version = "2", features = ["serde"] }
 clap       = { version = "4", features = ["derive"] }
 ustr       = { version = "1", features = ["serde"] }
 bitflags   = "2"
+chrono     = { version = "0.4", default-features = false, features = ["std", "alloc"] }
 
 [package]
 name = "ariadne"
@@ -35,3 +36,5 @@ serde_yaml = { workspace = true }
 indexmap   = { workspace = true }
 ustr       = { workspace = true }
 bitflags   = { workspace = true }
+chrono     = { workspace = true }
+humantime  = "2"
