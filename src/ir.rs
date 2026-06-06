@@ -385,11 +385,15 @@ pub struct Policies {
     /// Tie-break priority for the optimizer's cost comparison.
     #[serde(default = "default_objectives")]
     pub objectives: Vec<Objective>,
+    /// When true, backends install each job's declared tool dependencies on job
+    /// start. Default false: the execution environment is assumed to provide them.
+    #[serde(default)]
+    pub install_dependencies: bool,
 }
 
 impl Default for Policies {
     fn default() -> Self {
-        Self { max_parallel_jobs: None, objectives: default_objectives() }
+        Self { max_parallel_jobs: None, objectives: default_objectives(), install_dependencies: false }
     }
 }
 

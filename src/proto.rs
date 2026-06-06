@@ -358,6 +358,8 @@ pub fn from_wire(m: &wire::Workflow) -> ir::Workflow {
                     .unwrap_or_default();
                 if objs.is_empty() { ir::default_objectives() } else { objs }
             },
+            // Not carried on the binary wire; JSON TIR carries it via serde.
+            install_dependencies: false,
         },
         // ActionDefs are not carried on the binary wire (they are a frontend
         // authoring detail; the planner uses the inlined action fields).
