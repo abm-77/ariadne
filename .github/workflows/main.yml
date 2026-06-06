@@ -58,7 +58,8 @@ jobs:
         name: test_workspace-report
         path: test-results.xml
         retention-days: '1'
-  python-fmt-and-build-core-ext-and-build-wheel-and-install-wheel-and-test-wheel-and-python-docs-and-python-coverage:
+  python-fmt-and-build-core-ext-and-build-wheel-and-install-wheel-and-test-wheel-and-python-d-80b4fe17:
+    name: python-fmt-and-build-core-ext-and-build-wheel-and-install-wheel-and-test-wheel-and-python-docs-and-python-coverage
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository

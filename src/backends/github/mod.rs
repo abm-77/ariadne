@@ -277,10 +277,27 @@ fn setup_steps(plan: &Plan, unit: &crate::planner::ExecutionUnit) -> Vec<GhStep>
 }
 
 /// A GitHub job id from an action name: lowercase kebab-case. A fused unit's
-/// action name is already the fused names joined with '-', so its job is named
-/// for everything it runs.
+/// action name is already the fused names joined with '-and-', so its job is
+/// named for everything it runs.
 fn job_key(action_name: &str) -> String {
     action_name.to_lowercase().replace([' ', '_', '+'], "-")
+}
+
+/// Cap a job id to GitHub's identifier length (100), keeping it unique by
+/// appending a short deterministic hash of the full name when truncated.
+fn cap_id(name: &str) -> String {
+    const MAX: usize = 100;
+    if name.len() <= MAX {
+        return name.to_string();
+    }
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in name.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    let suffix = format!("-{:x}", h & 0xffff_ffff);
+    let keep = MAX - suffix.len();
+    format!("{}{}", name[..keep].trim_end_matches('-'), suffix)
 }
 
 fn setup_uses(name: &str, uses: &str, key: &str, value: String) -> GhStep {
@@ -395,11 +412,12 @@ fn plan_to_gha(
     let on = build_on(&plan.triggers, opts);
 
     // The job id is the (kebab-cased) action name, so a fused unit's job is named
-    // for all the actions it ran. `needs` reference these same keys.
+    // for all the actions it ran, capped to GitHub's id length. `needs` reference
+    // these same keys; the full name goes in the job's display `name`.
     let job_id: std::collections::HashMap<ustr::Ustr, String> = plan
         .units
         .iter()
-        .map(|u| (u.id, job_key(&u.action_name)))
+        .map(|u| (u.id, cap_id(&job_key(&u.action_name))))
         .collect();
 
     let jobs = plan
@@ -431,9 +449,14 @@ fn plan_to_gha(
                 steps.insert(after + offset, step);
             }
 
+            // Show the full fused name in `name:` when the id had to be capped.
+            let full = job_key(&unit.action_name);
+            let key = job_id[&unit.id].clone();
+            let name = (key != full).then_some(full);
             (
-                job_id[&unit.id].clone(),
+                key,
                 GhJob {
+                    name,
                     runs_on: unit.runner.to_string(),
                     needs: unit.needs.iter().map(|n| job_id[n].clone()).collect(),
                     environment: unit_environment(&unit.ops),
@@ -522,6 +545,8 @@ impl Serialize for EmptyMapping {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GhJob {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(rename = "runs-on")]
     pub runs_on: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
