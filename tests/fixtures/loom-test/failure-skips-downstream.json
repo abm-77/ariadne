@@ -13,10 +13,10 @@
         "producer": 1
       }
     ],
-    "actions": [
+    "action_calls": [
       {
         "name": "build",
-        "op": "build",
+        "action": "build",
         "outputs": [
           0
         ],
@@ -27,7 +27,7 @@
       },
       {
         "name": "publish",
-        "op": "publish",
+        "action": "publish",
         "inputs": [
           0
         ],

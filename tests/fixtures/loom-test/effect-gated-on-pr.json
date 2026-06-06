@@ -8,14 +8,14 @@
         "producer": 0
       }
     ],
-    "actions": [
+    "action_calls": [
       {
         "name": "deploy",
-        "op": "deploy",
+        "action": "deploy",
         "outputs": [
           0
         ],
-        "effects": [
+        "consequences": [
           0
         ],
         "shell": {
@@ -24,7 +24,7 @@
         }
       }
     ],
-    "effects": [
+    "consequences": [
       {
         "name": "ship",
         "kind": "Deployment",
@@ -51,7 +51,7 @@
       "assert": "run_passed"
     },
     {
-      "assert": "effect_gated",
+      "assert": "consequence_gated",
       "effect": "ship"
     }
   ]

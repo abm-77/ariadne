@@ -1,5 +1,4 @@
 use ariadne::backends::local::LocalBackend;
-use ariadne::backends::Backend;
 use ariadne::testing::{check_plan, optimize_for, run_fixture, Fixture};
 use std::fs;
 use std::path::Path;
@@ -47,7 +46,10 @@ fn loom_test_fixtures() {
         } else {
             let baseline = ariadne::planner::plan_for(&fixture.workflow, &fixture.event)
                 .unwrap_or_else(|e| panic!("plan fixture {name}: {e:?}"));
-            let plan = optimize_for(&fixture.workflow, baseline, backend.capability_profile());
+            let caps = ariadne::backends::derive_capability_profile_from_inventory(
+                fixture.workflow.inventory.as_ref()
+            );
+            let plan = optimize_for(&fixture.workflow, baseline, caps);
             check_plan(&plan, &backend, &fixture.assertions)
         };
 

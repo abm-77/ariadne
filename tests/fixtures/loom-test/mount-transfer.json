@@ -13,10 +13,10 @@
         "producer": 1
       }
     ],
-    "actions": [
+    "action_calls": [
       {
         "name": "prepare",
-        "op": "prepare",
+        "action": "prepare",
         "outputs": [
           0
         ],
@@ -32,7 +32,7 @@
       },
       {
         "name": "build",
-        "op": "build",
+        "action": "build",
         "inputs": [
           0
         ],
@@ -60,17 +60,20 @@
         }
       }
     ],
-    "actors": [
-      {
-        "name": "big",
-        "labels": [
-          "self-hosted"
-        ],
-        "capabilities": [
-          "mount"
-        ]
-      }
-    ],
+    "inventory": {
+      "id": "default",
+      "actors": [
+        {
+          "id": "big",
+          "labels": [
+            "self-hosted"
+          ],
+          "capabilities": [
+            "mount"
+          ]
+        }
+      ]
+    },
     "policies": {}
   },
   "event": {

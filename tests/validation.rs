@@ -45,8 +45,8 @@ fn simple_workflow_validates_clean() {
 fn missing_producer_action_is_error() {
     let mut wf = simple_workflow();
     // artifact 0 (source) says producer is action 0 (checkout),
-    // but remove checkout from the actions list so the index is out of bounds
-    wf.actions.clear();
+    // but remove checkout from the action_calls list so the index is out of bounds
+    wf.action_calls.clear();
     let diags = validate(&wf);
     assert!(diags.iter().any(|d| d.code == DiagCode::IndexOutOfBounds || d.code == DiagCode::MissingProducer));
 }
@@ -55,7 +55,7 @@ fn missing_producer_action_is_error() {
 fn output_not_listed_by_action_is_error() {
     let mut wf = simple_workflow();
     // Clear checkout's outputs while artifact 0 still says producer=0
-    wf.actions[0].outputs.clear();
+    wf.action_calls[0].outputs.clear();
     let diags = validate(&wf);
     assert!(diags.iter().any(|d| d.code == DiagCode::MissingProducer), "{diags:?}");
 }
@@ -64,7 +64,7 @@ fn output_not_listed_by_action_is_error() {
 fn out_of_bounds_artifact_ref_is_error() {
     let mut wf = simple_workflow();
     // Give build action an input index that doesn't exist
-    wf.actions[1].inputs.push(ArtifactId(99));
+    wf.action_calls[1].inputs.push(ArtifactId(99));
     let diags = validate(&wf);
     assert!(diags.iter().any(|d| d.code == DiagCode::IndexOutOfBounds));
 }
@@ -72,9 +72,9 @@ fn out_of_bounds_artifact_ref_is_error() {
 #[test]
 fn out_of_bounds_effect_ref_is_error() {
     let mut wf = simple_workflow();
-    wf.actions[0].effects.push(EffectId(99));
+    wf.action_calls[0].consequences.push(ConsequenceId(99));
     let diags = validate(&wf);
-    assert!(diags.iter().any(|d| d.code == DiagCode::UnknownEffect));
+    assert!(diags.iter().any(|d| d.code == DiagCode::UnknownConsequence));
 }
 
 #[test]

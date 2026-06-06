@@ -17,13 +17,11 @@
       "producer": 2
     }
   ],
-  "actions": [
+  "action_calls": [
     {
       "name": "checkout",
-      "op": "checkout",
-      "outputs": [
-        0
-      ],
+      "action": "checkout",
+      "outputs": [0],
       "shell": {
         "script": "git checkout .",
         "capture": "NoCapture"
@@ -31,13 +29,9 @@
     },
     {
       "name": "build",
-      "op": "build",
-      "inputs": [
-        0
-      ],
-      "outputs": [
-        1
-      ],
+      "action": "build",
+      "inputs": [0],
+      "outputs": [1],
       "shell": {
         "script": "cargo build --release",
         "capture": "NoCapture"
@@ -45,27 +39,24 @@
     },
     {
       "name": "test",
-      "op": "test",
-      "inputs": [
-        1
-      ],
-      "outputs": [
-        2
-      ],
+      "action": "test",
+      "inputs": [1],
+      "outputs": [2],
       "shell": {
         "script": "cargo test",
         "capture": "NoCapture"
       }
     }
   ],
-  "actors": [
-    {
-      "name": "github-ubuntu",
-      "labels": [
-        "ubuntu-latest"
-      ]
-    }
-  ],
+  "inventory": {
+    "id": "github",
+    "actors": [
+      {
+        "id": "github-ubuntu",
+        "labels": ["ubuntu-latest"]
+      }
+    ]
+  },
   "policies": {
     "max_parallel_jobs": 2
   }

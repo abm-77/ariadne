@@ -50,7 +50,7 @@ fn copy_fallback_emits_without_warnings() {
     // correct and carries no "fallback" warning — that warning is reserved for
     // the optimizer downgrading a declared mount it couldn't realize.
     let wf = fixture();
-    assert!(wf.actors.iter().all(|a| !a.capabilities.iter().any(|c| c == "mount")));
+    assert!(wf.actors().iter().all(|a| !a.capabilities.iter().any(|c| c == "mount")));
     let plan = ariadne::planner::plan(&wf).unwrap();
     assert!(plan.diagnostics.iter()
         .all(|d| d.code != ariadne::diagnostics::DiagCode::FallbackPlacementSelected));
@@ -62,7 +62,7 @@ fn copy_fallback_emits_without_warnings() {
 fn backend_emit_via_trait() {
     let plan = ariadne::planner::plan(&fixture()).unwrap();
     let backend = GithubActionsBackend::default();
-    assert_eq!(backend.name(), "github-actions");
+    assert_eq!(backend.name(), "github");
     let yaml = backend.emit(&plan).unwrap();
     assert!(yaml.contains("name: Simple Build and Test"));
 }

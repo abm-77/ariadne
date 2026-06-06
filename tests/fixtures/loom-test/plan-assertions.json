@@ -14,10 +14,10 @@
         "path": "target/release/app"
       }
     ],
-    "actions": [
+    "action_calls": [
       {
         "name": "checkout",
-        "op": "checkout",
+        "action": "checkout",
         "outputs": [
           0
         ],
@@ -33,14 +33,14 @@
       },
       {
         "name": "build",
-        "op": "build",
+        "action": "build",
         "inputs": [
           0
         ],
         "outputs": [
           1
         ],
-        "effects": [
+        "consequences": [
           0
         ],
         "secrets": [
@@ -58,11 +58,11 @@
       },
       {
         "name": "deploy",
-        "op": "deploy",
+        "action": "deploy",
         "inputs": [
           1
         ],
-        "effects": [
+        "consequences": [
           1
         ],
         "actor_constraints": [
@@ -76,7 +76,7 @@
         }
       }
     ],
-    "effects": [
+    "consequences": [
       {
         "name": "release",
         "kind": "PublishRelease",
@@ -88,23 +88,26 @@
         "requires_approval": false
       }
     ],
-    "actors": [
-      {
-        "name": "runner",
-        "labels": [
-          "ubuntu-latest"
-        ]
-      },
-      {
-        "name": "gpu-box",
-        "labels": [
-          "self-hosted"
-        ],
-        "capabilities": [
-          "gpu"
-        ]
-      }
-    ],
+    "inventory": {
+      "id": "default",
+      "actors": [
+        {
+          "id": "runner",
+          "labels": [
+            "ubuntu-latest"
+          ]
+        },
+        {
+          "id": "gpu-box",
+          "labels": [
+            "self-hosted"
+          ],
+          "capabilities": [
+            "gpu"
+          ]
+        }
+      ]
+    },
     "policies": {
       "max_parallel_jobs": 4
     }
@@ -116,19 +119,19 @@
   },
   "assertions": [
     {
-      "assert": "has_effect",
+      "assert": "has_consequence",
       "effect": "release"
     },
     {
-      "assert": "effect_requires_approval",
+      "assert": "consequence_requires_approval",
       "effect": "release"
     },
     {
-      "assert": "effect_gated",
+      "assert": "consequence_gated",
       "effect": "release"
     },
     {
-      "assert": "effect_fired",
+      "assert": "consequence_fired",
       "effect": "ship"
     },
     {

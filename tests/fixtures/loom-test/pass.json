@@ -9,10 +9,10 @@
         "path": "dist/app"
       }
     ],
-    "actions": [
+    "action_calls": [
       {
         "name": "build",
-        "op": "build",
+        "action": "build",
         "outputs": [
           0
         ],
