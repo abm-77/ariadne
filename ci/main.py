@@ -31,7 +31,7 @@ from ariadne import (
 )
 from ariadne.testing import test_case, expect
 
-PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "profile.json")
+PROFILE_PATH = os.path.join(os.path.dirname(__file__), "profile.json")
 
 # Runner pricing so the cost model values fewer jobs; lets sibling fusion auto-
 # group same-toolchain work. Real timings arrive via the committed profile.json.
