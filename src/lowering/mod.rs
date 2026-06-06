@@ -460,13 +460,19 @@ mod tests {
     fn ambiguous_selection_warns_but_pin_is_silent() {
         // fmt.check has cargo + ruff; with no pin/prefer/inventory they tie.
         let amb = reg().select("fmt.check", &Args::new(), None, &[]).unwrap();
-        assert!(amb.warnings.iter().any(|w| w.code == DiagCode::AmbiguousImplementation));
+        assert!(
+            amb.warnings
+                .iter()
+                .any(|w| w.code == DiagCode::AmbiguousImplementation)
+        );
         // A pin (or a single candidate) resolves it: no warning.
         let pinned = reg()
             .select_using("fmt.check", &Args::new(), None, &[], Some("ruff"), &[])
             .unwrap();
         assert!(pinned.warnings.is_empty());
-        let single = reg().select("scm.checkout", &Args::new(), None, &[]).unwrap();
+        let single = reg()
+            .select("scm.checkout", &Args::new(), None, &[])
+            .unwrap();
         assert!(single.warnings.is_empty());
     }
 
