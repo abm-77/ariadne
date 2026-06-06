@@ -1,4 +1,4 @@
-use super::{arg_list, arg_str, def, local, Registry};
+use super::{Registry, arg_list, arg_str, def, local};
 
 /// Forge (code-hosting platform) lowerings.
 pub fn register(r: &mut Registry) {

@@ -41,6 +41,7 @@ class ContainerBuilder:
     def exec(self, body: str | list) -> ContainerImpl:
         if isinstance(body, str):
             import textwrap
+
             script = textwrap.dedent(body).strip()
         elif isinstance(body, list):
             script = "\n".join(str(s).strip() for s in body)
@@ -86,8 +87,13 @@ class SemanticImpl:
 
     _kind = "semantic"
 
-    def __init__(self, op: str, args: dict | None = None, using: str | None = None,
-                 prefer: list[str] | None = None):
+    def __init__(
+        self,
+        op: str,
+        args: dict | None = None,
+        using: str | None = None,
+        prefer: list[str] | None = None,
+    ):
         self.op = op
         self.args = {k: _arg_value(v) for k, v in (args or {}).items() if v is not None}
         self.using = using
@@ -131,8 +137,8 @@ class _ImplBinding:
 def impl(name: str) -> _ImplBinding:
     """Scoped preference for one implementation:
 
-        with impl("pytest"):
-            test.unit(paths=["tests/"])     # lowers via pytest where applicable
+    with impl("pytest"):
+        test.unit(paths=["tests/"])     # lowers via pytest where applicable
     """
     return _ImplBinding([name])
 

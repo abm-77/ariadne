@@ -4,14 +4,20 @@ use ustr::Ustr;
 
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+        )]
         pub struct $name(pub u32);
         impl $name {
             #[inline]
-            pub fn idx(self) -> usize { self.0 as usize }
+            pub fn idx(self) -> usize {
+                self.0 as usize
+            }
         }
         impl From<usize> for $name {
-            fn from(n: usize) -> Self { Self(n as u32) }
+            fn from(n: usize) -> Self {
+                Self(n as u32)
+            }
         }
     };
 }
@@ -119,16 +125,32 @@ impl Actor {
     pub fn satisfies(&self, req: &Resources) -> bool {
         let have = self.resources.clone().unwrap_or_default();
         if let Some(c) = req.cpu
-            && have.cpu.unwrap_or(0) < c { return false; }
+            && have.cpu.unwrap_or(0) < c
+        {
+            return false;
+        }
         if let Some(g) = req.gpu
-            && have.gpu.unwrap_or(0) < g { return false; }
+            && have.gpu.unwrap_or(0) < g
+        {
+            return false;
+        }
         if let Some(m) = &req.memory {
             let need = parse_size_bytes(m).unwrap_or(0);
-            if have.memory.as_deref().and_then(parse_size_bytes).unwrap_or(0) < need { return false; }
+            if have
+                .memory
+                .as_deref()
+                .and_then(parse_size_bytes)
+                .unwrap_or(0)
+                < need
+            {
+                return false;
+            }
         }
         if let Some(d) = &req.disk {
             let need = parse_size_bytes(d).unwrap_or(0);
-            if have.disk.as_deref().and_then(parse_size_bytes).unwrap_or(0) < need { return false; }
+            if have.disk.as_deref().and_then(parse_size_bytes).unwrap_or(0) < need {
+                return false;
+            }
         }
         true
     }
@@ -375,7 +397,11 @@ pub enum Objective {
 
 /// Default objective priority: latency, then bytes, then dollars.
 pub fn default_objectives() -> Vec<Objective> {
-    vec![Objective::CriticalPath, Objective::TransferBytes, Objective::DollarCost]
+    vec![
+        Objective::CriticalPath,
+        Objective::TransferBytes,
+        Objective::DollarCost,
+    ]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -393,7 +419,11 @@ pub struct Policies {
 
 impl Default for Policies {
     fn default() -> Self {
-        Self { max_parallel_jobs: None, objectives: default_objectives(), install_dependencies: false }
+        Self {
+            max_parallel_jobs: None,
+            objectives: default_objectives(),
+            install_dependencies: false,
+        }
     }
 }
 
@@ -449,20 +479,30 @@ impl Workflow {
 
     /// Returns the actors from the inventory, or an empty slice if absent.
     pub fn actors(&self) -> &[Actor] {
-        self.inventory.as_ref().map(|inv| inv.actors.as_slice()).unwrap_or(&[])
+        self.inventory
+            .as_ref()
+            .map(|inv| inv.actors.as_slice())
+            .unwrap_or(&[])
     }
 }
 
 impl Workflow {
     #[inline]
-    pub fn artifact(&self, id: ArtifactId) -> &Artifact { &self.artifacts[id.idx()] }
+    pub fn artifact(&self, id: ArtifactId) -> &Artifact {
+        &self.artifacts[id.idx()]
+    }
     #[inline]
-    pub fn action_call(&self, id: ActionCallId) -> &ActionCall { &self.action_calls[id.idx()] }
+    pub fn action_call(&self, id: ActionCallId) -> &ActionCall {
+        &self.action_calls[id.idx()]
+    }
     #[inline]
-    pub fn consequence(&self, id: ConsequenceId) -> &Consequence { &self.consequences[id.idx()] }
+    pub fn consequence(&self, id: ConsequenceId) -> &Consequence {
+        &self.consequences[id.idx()]
+    }
     #[inline]
     pub fn actor(&self, id: ActorId) -> &Actor {
-        self.inventory.as_ref()
+        self.inventory
+            .as_ref()
             .and_then(|inv| inv.actors.get(id.idx()))
             .expect("ActorId references missing inventory actor")
     }
@@ -486,20 +526,35 @@ pub struct WorkflowBuilder {
 
 impl WorkflowBuilder {
     pub fn new(name: &str) -> Self {
-        Self { name: name.into(), ..Default::default() }
+        Self {
+            name: name.into(),
+            ..Default::default()
+        }
     }
 
     /// Declare an artifact; returns its ID.
     pub fn artifact(&mut self, name: &str, ty: ArtifactType) -> ArtifactId {
         let id = ArtifactId(self.artifacts.len() as u32);
-        self.artifacts.push(Artifact { name: name.into(), ty, producer: None, path: None, lifetime: None });
+        self.artifacts.push(Artifact {
+            name: name.into(),
+            ty,
+            producer: None,
+            path: None,
+            lifetime: None,
+        });
         id
     }
 
     /// Declare an artifact with a workspace path; returns its ID.
     pub fn artifact_at(&mut self, name: &str, ty: ArtifactType, path: &str) -> ArtifactId {
         let id = ArtifactId(self.artifacts.len() as u32);
-        self.artifacts.push(Artifact { name: name.into(), ty, producer: None, path: Some(path.into()), lifetime: None });
+        self.artifacts.push(Artifact {
+            name: name.into(),
+            ty,
+            producer: None,
+            path: Some(path.into()),
+            lifetime: None,
+        });
         id
     }
 
@@ -550,24 +605,31 @@ impl WorkflowBuilder {
     }
 
     pub fn add_consequence_to(&mut self, action: ActionCallId, consequence: ConsequenceId) {
-        self.action_calls[action.idx()].consequences.push(consequence);
+        self.action_calls[action.idx()]
+            .consequences
+            .push(consequence);
     }
 
     /// Declare secrets an action needs, by name.
     pub fn add_secrets(&mut self, action: ActionCallId, names: &[&str]) {
-        self.action_calls[action.idx()].secrets
+        self.action_calls[action.idx()]
+            .secrets
             .extend(names.iter().map(|s| Ustr::from(s)));
     }
 
     /// Pin an action to a specific actor.
     pub fn constrain_actor(&mut self, action: ActionCallId, actor: ActorId) {
-        self.action_calls[action.idx()].actor_constraints.push(ActorConstraint::Specific(actor));
+        self.action_calls[action.idx()]
+            .actor_constraints
+            .push(ActorConstraint::Specific(actor));
     }
 
     /// Constrain an action to actors carrying a label (a soft constraint: the
     /// optimizer may pick any actor with this label).
     pub fn constrain_label(&mut self, action: ActionCallId, label: &str) {
-        self.action_calls[action.idx()].actor_constraints.push(ActorConstraint::Label(Ustr::from(label)));
+        self.action_calls[action.idx()]
+            .actor_constraints
+            .push(ActorConstraint::Label(Ustr::from(label)));
     }
 
     /// Declare a placement strategy for an artifact.
@@ -575,9 +637,18 @@ impl WorkflowBuilder {
         self.placements.push(Placement { artifact, strategy });
     }
 
-    pub fn consequence(&mut self, name: &str, kind: ConsequenceKind, requires_approval: bool) -> ConsequenceId {
+    pub fn consequence(
+        &mut self,
+        name: &str,
+        kind: ConsequenceKind,
+        requires_approval: bool,
+    ) -> ConsequenceId {
         let id = ConsequenceId(self.consequences.len() as u32);
-        self.consequences.push(Consequence { name: name.into(), kind, requires_approval });
+        self.consequences.push(Consequence {
+            name: name.into(),
+            kind,
+            requires_approval,
+        });
         id
     }
 
@@ -634,7 +705,10 @@ impl WorkflowBuilder {
     }
 
     pub fn build(self) -> Workflow {
-        let inventory = if !self.inv_actors.is_empty() || !self.inv_placements.is_empty() || !self.inv_implementations.is_empty() {
+        let inventory = if !self.inv_actors.is_empty()
+            || !self.inv_placements.is_empty()
+            || !self.inv_implementations.is_empty()
+        {
             Some(Inventory {
                 id: "default".into(),
                 actors: self.inv_actors,

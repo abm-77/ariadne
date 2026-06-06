@@ -173,8 +173,13 @@ class Suite:
         return json.dumps(self.to_tir(), indent=indent)
 
 
-def test_case(_fn: Any = None, *, name: str | None = None,
-              event: dict | None = None, backend: str | None = None) -> Any:
+def test_case(
+    _fn: Any = None,
+    *,
+    name: str | None = None,
+    event: dict | None = None,
+    backend: str | None = None,
+) -> Any:
     """Decorate a function as a loom test case. The body calls `expect.*` to
     state assertions over the workflow's plan for the given `event` (default:
     push to main). `backend` is needed for `selected_instruction` assertions.

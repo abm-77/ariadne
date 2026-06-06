@@ -1,13 +1,13 @@
-pub mod renderers;
+pub mod external;
 pub mod github;
 pub mod local;
 pub mod registry;
-pub mod external;
+pub mod renderers;
 
 use crate::diagnostics::Diagnostic;
-use crate::planner::{LogicalOp, Plan, AccessMode};
+use crate::planner::{AccessMode, LogicalOp, Plan};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use std::collections::{HashMap, HashSet};
 use ustr::Ustr;
 
@@ -105,16 +105,27 @@ bitflags::bitflags! {
 pub fn derive_capability_profile_from_inventory(
     inv: Option<&crate::ir::Inventory>,
 ) -> BackendCapabilities {
-    let inv = match inv { Some(i) => i, None => return BackendCapabilities::empty() };
-    let actors = inv.actors.iter().map(|a| ActorClass {
-        id: a.id.to_string(),
-        labels: a.labels.iter().map(|s| s.to_string()).collect(),
-        capabilities: actor_caps_from_strings(&a.capabilities),
-    }).collect::<Vec<_>>();
-    let placements = inv.placements.iter().map(|p| PlacementProvider {
-        id: p.id.to_string(),
-        capabilities: placement_caps_from_strings(&p.access_modes),
-    }).collect::<Vec<_>>();
+    let inv = match inv {
+        Some(i) => i,
+        None => return BackendCapabilities::empty(),
+    };
+    let actors = inv
+        .actors
+        .iter()
+        .map(|a| ActorClass {
+            id: a.id.to_string(),
+            labels: a.labels.iter().map(|s| s.to_string()).collect(),
+            capabilities: actor_caps_from_strings(&a.capabilities),
+        })
+        .collect::<Vec<_>>();
+    let placements = inv
+        .placements
+        .iter()
+        .map(|p| PlacementProvider {
+            id: p.id.to_string(),
+            capabilities: placement_caps_from_strings(&p.access_modes),
+        })
+        .collect::<Vec<_>>();
     derive_capability_profile(&actors, &placements)
 }
 
@@ -130,7 +141,9 @@ fn actor_caps_from_strings(v: &[ustr::Ustr]) -> ActorCapabilities {
             "podman" => caps |= ActorCapabilities::PODMAN,
             "gpu" => caps |= ActorCapabilities::GPU,
             "persistent_workspace" => caps |= ActorCapabilities::PERSISTENT_WORKSPACE,
-            "cache_mount_access" | "mount" | "mount_access" => caps |= ActorCapabilities::MOUNT_ACCESS,
+            "cache_mount_access" | "mount" | "mount_access" => {
+                caps |= ActorCapabilities::MOUNT_ACCESS
+            }
             _ => {}
         }
     }
@@ -159,16 +172,28 @@ fn derive_capability_profile(
     placements: &[PlacementProvider],
 ) -> BackendCapabilities {
     let mut caps = BackendCapabilities::empty();
-    if actors.iter().any(|a| a.capabilities.contains(ActorCapabilities::MOUNT_ACCESS)) {
+    if actors
+        .iter()
+        .any(|a| a.capabilities.contains(ActorCapabilities::MOUNT_ACCESS))
+    {
         caps |= BackendCapabilities::MOUNTS;
     }
-    if placements.iter().any(|p| p.capabilities.contains(PlacementCapabilities::SAME_HOST)) {
+    if placements
+        .iter()
+        .any(|p| p.capabilities.contains(PlacementCapabilities::SAME_HOST))
+    {
         caps |= BackendCapabilities::COLOCATION;
     }
-    if placements.iter().any(|p| p.capabilities.contains(PlacementCapabilities::PERSISTENT)) {
+    if placements
+        .iter()
+        .any(|p| p.capabilities.contains(PlacementCapabilities::PERSISTENT))
+    {
         caps |= BackendCapabilities::CACHE;
     }
-    if placements.iter().any(|p| p.capabilities.contains(PlacementCapabilities::STREAM)) {
+    if placements
+        .iter()
+        .any(|p| p.capabilities.contains(PlacementCapabilities::STREAM))
+    {
         caps |= BackendCapabilities::STREAM;
     }
     caps
@@ -178,7 +203,7 @@ fn derive_capability_profile(
 // Instruction-selection layer
 // ---------------------------------------------------------------------------
 
-pub use crate::select::{Capability, Candidate, Stability};
+pub use crate::select::{Candidate, Capability, Stability};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostHint {
@@ -187,14 +212,21 @@ pub struct CostHint {
 }
 
 impl Default for CostHint {
-    fn default() -> Self { Self { fixed: 5, per_mb: 0 } }
+    fn default() -> Self {
+        Self {
+            fixed: 5,
+            per_mb: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InstructionId(pub Ustr);
 
 impl<S: AsRef<str>> From<S> for InstructionId {
-    fn from(s: S) -> Self { Self(Ustr::from(s.as_ref())) }
+    fn from(s: S) -> Self {
+        Self(Ustr::from(s.as_ref()))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,18 +238,27 @@ pub struct OpMatcher {
 
 impl OpMatcher {
     pub fn for_op(op: &str) -> Self {
-        Self { op: op.into(), extra: HashMap::new() }
+        Self {
+            op: op.into(),
+            extra: HashMap::new(),
+        }
     }
 
     pub fn matches(&self, op: &LogicalOp) -> bool {
-        if op.name() != self.op.as_str() { return false; }
+        if op.name() != self.op.as_str() {
+            return false;
+        }
         for (key, val) in &self.extra {
             match (key.as_str(), op) {
                 ("access", LogicalOp::TransferArtifact { access, .. }) => {
-                    if transfer_access_name(access) != val.as_str() { return false; }
+                    if transfer_access_name(access) != val.as_str() {
+                        return false;
+                    }
                 }
                 ("native_id", LogicalOp::Native { id, .. }) => {
-                    if id.as_str() != val.as_str() { return false; }
+                    if id.as_str() != val.as_str() {
+                        return false;
+                    }
                 }
                 _ => return false,
             }
@@ -245,9 +286,15 @@ pub struct Instruction {
 }
 
 impl Candidate for Instruction {
-    fn key(&self) -> &str { &self.matcher.op }
-    fn requires(&self) -> &[Capability] { &self.requires }
-    fn stability(&self) -> Stability { self.stability }
+    fn key(&self) -> &str {
+        &self.matcher.op
+    }
+    fn requires(&self) -> &[Capability] {
+        &self.requires
+    }
+    fn stability(&self) -> Stability {
+        self.stability
+    }
 }
 
 /// The backend's instruction catalogue is just a `select::Registry` of
@@ -274,7 +321,11 @@ pub struct Selector<'a> {
 
 impl<'a> Selector<'a> {
     pub fn new(catalogue: &'a Catalogue, policy: Policy, backend: BackendKind) -> Self {
-        Self { catalogue, policy, backend }
+        Self {
+            catalogue,
+            policy,
+            backend,
+        }
     }
 
     pub fn for_backend(backend: &'a impl Backend) -> Self {
@@ -294,30 +345,44 @@ impl<'a> Selector<'a> {
         let op_name = op.name();
 
         if let Some(pinned) = self.policy.instruction_pins.get(op_name)
-            && let Some(instr) = self.catalogue.all().iter().find(|i| &i.id == pinned) {
-                return Some(SelectedInstruction {
-                    instruction: instr,
-                    reason: format!("pinned by policy to {}", pinned.0),
-                });
-            }
+            && let Some(instr) = self.catalogue.all().iter().find(|i| &i.id == pinned)
+        {
+            return Some(SelectedInstruction {
+                instruction: instr,
+                reason: format!("pinned by policy to {}", pinned.0),
+            });
+        }
 
         // Matching and policy exclusion are instruction-selection-specific and
         // stay here; gathering by key, the hard-requirement filter, and the
         // cost/stability ranking are the shared engine (`select`). Cost is this
         // layer's priority.
-        let available: Vec<Capability> =
-            backend_caps.iter().chain(actor_caps.iter()).copied().collect();
-        let candidates = self.catalogue.candidates(op_name)
+        let available: Vec<Capability> = backend_caps
+            .iter()
+            .chain(actor_caps.iter())
+            .copied()
+            .collect();
+        let candidates = self
+            .catalogue
+            .candidates(op_name)
             .filter(|i| i.backend == self.backend)
             .filter(|i| i.matcher.matches(op))
-            .filter(|i| self.policy.allowed_instructions.as_ref()
-                .is_none_or(|allowed| allowed.contains(&i.id)));
+            .filter(|i| {
+                self.policy
+                    .allowed_instructions
+                    .as_ref()
+                    .is_none_or(|allowed| allowed.contains(&i.id))
+            });
 
-        crate::select::resolve(candidates, &available, |i| i.cost.fixed)
-            .map(|instr| SelectedInstruction {
+        crate::select::resolve(candidates, &available, |i| i.cost.fixed).map(|instr| {
+            SelectedInstruction {
                 instruction: instr,
-                reason: format!("selected: cost={}, stability={:?}", instr.cost.fixed, instr.stability),
-            })
+                reason: format!(
+                    "selected: cost={}, stability={:?}",
+                    instr.cost.fixed, instr.stability
+                ),
+            }
+        })
     }
 }
 
@@ -343,12 +408,16 @@ pub struct BackendUnitRequest {
 pub fn plan_to_request(plan: &Plan) -> BackendPlanRequest {
     BackendPlanRequest {
         workflow_name: plan.workflow_name.to_string(),
-        units: plan.units.iter().map(|u| BackendUnitRequest {
-            id: u.id.to_string(),
-            runner: u.runner.to_string(),
-            needs: u.needs.iter().map(|n| n.to_string()).collect(),
-            ops: u.ops.iter().map(logical_op_to_json).collect(),
-        }).collect(),
+        units: plan
+            .units
+            .iter()
+            .map(|u| BackendUnitRequest {
+                id: u.id.to_string(),
+                runner: u.runner.to_string(),
+                needs: u.needs.iter().map(|n| n.to_string()).collect(),
+                ops: u.ops.iter().map(logical_op_to_json).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -361,7 +430,11 @@ fn logical_op_to_json(op: &LogicalOp) -> JsonValue {
             "script": script,
             "env": env
         }),
-        LogicalOp::UploadArtifact { name, path, lifetime } => json!({
+        LogicalOp::UploadArtifact {
+            name,
+            path,
+            lifetime,
+        } => json!({
             "kind": "UploadArtifact",
             "name": name.as_str(),
             "path": path,
@@ -380,7 +453,9 @@ fn logical_op_to_json(op: &LogicalOp) -> JsonValue {
         }),
         LogicalOp::RestoreCache { key } => json!({"kind": "RestoreCache", "key": key.as_str()}),
         LogicalOp::SaveCache { key } => json!({"kind": "SaveCache", "key": key.as_str()}),
-        LogicalOp::RequestApproval { reason } => json!({"kind": "RequestApproval", "reason": reason}),
+        LogicalOp::RequestApproval { reason } => {
+            json!({"kind": "RequestApproval", "reason": reason})
+        }
         LogicalOp::Native { id, args, fallback } => json!({
             "kind": "Native",
             "id": id.as_str(),
@@ -412,12 +487,24 @@ pub trait EmittingBackend: Send + Sync {
 }
 
 impl<B: Backend> EmittingBackend for B {
-    fn id(&self) -> &str { self.name() }
-    fn backend_kind(&self) -> BackendKind { Backend::backend_kind(self) }
-    fn capabilities(&self) -> Vec<Capability> { Backend::capabilities(self) }
-    fn workflow_capabilities(&self) -> WorkflowCapabilities { Backend::workflow_capabilities(self) }
-    fn catalogue(&self) -> &Catalogue { Backend::catalogue(self) }
-    fn emit(&self, plan: &Plan) -> Result<String, Vec<Diagnostic>> { Backend::emit(self, plan) }
+    fn id(&self) -> &str {
+        self.name()
+    }
+    fn backend_kind(&self) -> BackendKind {
+        Backend::backend_kind(self)
+    }
+    fn capabilities(&self) -> Vec<Capability> {
+        Backend::capabilities(self)
+    }
+    fn workflow_capabilities(&self) -> WorkflowCapabilities {
+        Backend::workflow_capabilities(self)
+    }
+    fn catalogue(&self) -> &Catalogue {
+        Backend::catalogue(self)
+    }
+    fn emit(&self, plan: &Plan) -> Result<String, Vec<Diagnostic>> {
+        Backend::emit(self, plan)
+    }
     fn select_op(&self, op: &LogicalOp) -> Option<InstructionSummary> {
         let sel = Selector::for_backend(self);
         let caps = Backend::capabilities(self);
@@ -458,7 +545,10 @@ pub trait Backend: Send + Sync {
         Ok(self.render(&self.lower(plan)))
     }
 
-    fn selector(&self) -> Selector<'_> where Self: Sized {
+    fn selector(&self) -> Selector<'_>
+    where
+        Self: Sized,
+    {
         Selector::for_backend(self)
     }
 }
@@ -483,14 +573,23 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_instr(id: &str, op: &str, backend: BackendKind, requires: Vec<Capability>, cost: u32) -> Instruction {
+    fn make_instr(
+        id: &str,
+        op: &str,
+        backend: BackendKind,
+        requires: Vec<Capability>,
+        cost: u32,
+    ) -> Instruction {
         Instruction {
             id: InstructionId(id.into()),
             backend,
             provides: vec![],
             requires,
             matcher: OpMatcher::for_op(op),
-            cost: CostHint { fixed: cost, per_mb: 0 },
+            cost: CostHint {
+                fixed: cost,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({}),
             bind: Bindings::default(),
@@ -499,10 +598,13 @@ mod tests {
 
     #[test]
     fn selects_matching_instruction() {
-        let cat = Catalogue::from_items(vec![
-            make_instr("github.checkout", "CheckoutRepo", BackendKind::Github,
-                vec![Capability::new("github.action_calls.uses")], 5),
-        ]);
+        let cat = Catalogue::from_items(vec![make_instr(
+            "github.checkout",
+            "CheckoutRepo",
+            BackendKind::Github,
+            vec![Capability::new("github.action_calls.uses")],
+            5,
+        )]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
         let caps = vec![Capability::new("github.action_calls.uses")];
         let result = sel.select(&LogicalOp::CheckoutRepo, &caps, &[]);
@@ -512,19 +614,26 @@ mod tests {
 
     #[test]
     fn filters_by_missing_capability() {
-        let cat = Catalogue::from_items(vec![
-            make_instr("github.checkout", "CheckoutRepo", BackendKind::Github,
-                vec![Capability::new("github.action_calls.uses")], 5),
-        ]);
+        let cat = Catalogue::from_items(vec![make_instr(
+            "github.checkout",
+            "CheckoutRepo",
+            BackendKind::Github,
+            vec![Capability::new("github.action_calls.uses")],
+            5,
+        )]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
         assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
     }
 
     #[test]
     fn filters_by_backend_kind() {
-        let cat = Catalogue::from_items(vec![
-            make_instr("local.checkout", "CheckoutRepo", BackendKind::Local, vec![], 3),
-        ]);
+        let cat = Catalogue::from_items(vec![make_instr(
+            "local.checkout",
+            "CheckoutRepo",
+            BackendKind::Local,
+            vec![],
+            3,
+        )]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
         assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
     }
@@ -536,9 +645,18 @@ mod tests {
             make_instr("b", "CheckoutRepo", BackendKind::Github, vec![], 1),
         ]);
         let mut policy = Policy::default();
-        policy.instruction_pins.insert("CheckoutRepo".into(), InstructionId("a".into()));
+        policy
+            .instruction_pins
+            .insert("CheckoutRepo".into(), InstructionId("a".into()));
         let sel = Selector::new(&cat, policy, BackendKind::Github);
-        assert_eq!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).unwrap().instruction.id.0, "a");
+        assert_eq!(
+            sel.select(&LogicalOp::CheckoutRepo, &[], &[])
+                .unwrap()
+                .instruction
+                .id
+                .0,
+            "a"
+        );
     }
 
     #[test]
@@ -548,16 +666,27 @@ mod tests {
             make_instr("cheap", "RunShell", BackendKind::Github, vec![], 1),
         ]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        let op = LogicalOp::RunShell { label: "x".into(), script: "echo hi".into(), env: Default::default() };
+        let op = LogicalOp::RunShell {
+            label: "x".into(),
+            script: "echo hi".into(),
+            env: Default::default(),
+        };
         assert_eq!(sel.select(&op, &[], &[]).unwrap().instruction.id.0, "cheap");
     }
 
     #[test]
     fn allowlist_rejects_unlisted_instruction() {
-        let cat = Catalogue::from_items(vec![
-            make_instr("github.checkout", "CheckoutRepo", BackendKind::Github, vec![], 5),
-        ]);
-        let policy = Policy { allowed_instructions: Some(HashSet::new()), ..Default::default() };
+        let cat = Catalogue::from_items(vec![make_instr(
+            "github.checkout",
+            "CheckoutRepo",
+            BackendKind::Github,
+            vec![],
+            5,
+        )]);
+        let policy = Policy {
+            allowed_instructions: Some(HashSet::new()),
+            ..Default::default()
+        };
         let sel = Selector::new(&cat, policy, BackendKind::Github);
         assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
     }
@@ -579,8 +708,16 @@ mod tests {
     fn op_matcher_extra_predicate_access() {
         let mut matcher = OpMatcher::for_op("TransferArtifact");
         matcher.extra.insert("access".into(), "Copy".into());
-        let copy_op = LogicalOp::TransferArtifact { name: "x".into(), path: None, access: AccessMode::Copy };
-        let mount_op = LogicalOp::TransferArtifact { name: "x".into(), path: None, access: AccessMode::MountReadOnly };
+        let copy_op = LogicalOp::TransferArtifact {
+            name: "x".into(),
+            path: None,
+            access: AccessMode::Copy,
+        };
+        let mount_op = LogicalOp::TransferArtifact {
+            name: "x".into(),
+            path: None,
+            access: AccessMode::MountReadOnly,
+        };
         assert!(matcher.matches(&copy_op));
         assert!(!matcher.matches(&mount_op));
     }
@@ -650,8 +787,18 @@ mod tests {
         assert_eq!(req.workflow_name, "test");
         assert_eq!(req.units.len(), 2);
         let build_unit = req.units.iter().find(|u| u.id == "build").unwrap();
-        assert!(build_unit.ops.iter().any(|op| op["kind"] == "DownloadArtifact"));
+        assert!(
+            build_unit
+                .ops
+                .iter()
+                .any(|op| op["kind"] == "DownloadArtifact")
+        );
         assert!(build_unit.ops.iter().any(|op| op["kind"] == "RunShell"));
-        assert!(build_unit.ops.iter().any(|op| op["kind"] == "UploadArtifact"));
+        assert!(
+            build_unit
+                .ops
+                .iter()
+                .any(|op| op["kind"] == "UploadArtifact")
+        );
     }
 }

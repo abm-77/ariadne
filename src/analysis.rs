@@ -32,12 +32,20 @@ impl Analysis {
             let id = ActionCallId(idx as u32);
             if action.consequences.is_empty() {
                 pure_actions.insert(id);
-            } else if action.consequences.iter().any(|&e| is_barrier(&workflow.consequence(e).kind)) {
+            } else if action
+                .consequences
+                .iter()
+                .any(|&e| is_barrier(&workflow.consequence(e).kind))
+            {
                 effect_barriers.insert(id);
             }
         }
 
-        Analysis { consumer_count, pure_actions, effect_barriers }
+        Analysis {
+            consumer_count,
+            pure_actions,
+            effect_barriers,
+        }
     }
 
     pub fn consumers(&self, artifact: ArtifactId) -> usize {
@@ -55,9 +63,13 @@ impl Analysis {
 
 /// Privileged, externally-observable effects that pin ordering.
 fn is_barrier(kind: &ConsequenceKind) -> bool {
-    matches!(kind,
-        ConsequenceKind::Deployment | ConsequenceKind::PublishRelease
-        | ConsequenceKind::GitWrite | ConsequenceKind::SecretAccess)
+    matches!(
+        kind,
+        ConsequenceKind::Deployment
+            | ConsequenceKind::PublishRelease
+            | ConsequenceKind::GitWrite
+            | ConsequenceKind::SecretAccess
+    )
 }
 
 #[cfg(test)]

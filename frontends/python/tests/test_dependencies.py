@@ -12,12 +12,15 @@ def _wf(install: bool):
     inv = (
         Inventory("t")
         .actor("runner", selector=["ubuntu-latest"], capabilities=["linux"])
-        .use("python", version="3.12").use("maturin").use("pytest")
+        .use("python", version="3.12")
+        .use("maturin")
+        .use("pytest")
     )
 
     @action(outputs={"src": SourceTree})
     def checkout():
         from ariadne import shell
+
         return shell("git checkout .")
 
     @action(outputs={"wheel": Wheel.glob("dist/*.whl")})
@@ -50,8 +53,8 @@ def test_install_on_start_provisions_declared_tools():
     yaml = Pipeline(_wf(install=True)).compile(backend="github", level=0)
     assert "Install dependencies" in yaml
     # Each job installs the tool its action declared.
-    assert "pip install maturin" in yaml   # build_wheel -> maturin
-    assert "pip install pytest" in yaml     # run_tests -> pytest
+    assert "pip install maturin" in yaml  # build_wheel -> maturin
+    assert "pip install pytest" in yaml  # run_tests -> pytest
 
 
 def test_install_on_start_provisions_toolchains_from_inventory():

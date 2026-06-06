@@ -19,8 +19,12 @@ use ustr::Ustr;
 pub struct SiblingFusionPass;
 
 impl Pass for SiblingFusionPass {
-    fn name(&self) -> &str { "sibling_fusion" }
-    fn min_level(&self) -> OptLevel { OptLevel::O3 }
+    fn name(&self) -> &str {
+        "sibling_fusion"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O3
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         let mut decisions = Vec::new();
@@ -39,19 +43,28 @@ impl Pass for SiblingFusionPass {
                     if cost.cmp_by(&base, &ctx.objectives) != Ordering::Less {
                         continue; // not a strict improvement
                     }
-                    if best.as_ref().is_none_or(|(_, _, b)| cost.cmp_by(b, &ctx.objectives) == Ordering::Less) {
+                    if best
+                        .as_ref()
+                        .is_none_or(|(_, _, b)| cost.cmp_by(b, &ctx.objectives) == Ordering::Less)
+                    {
                         best = Some((i, j, cost));
                     }
                 }
             }
             let Some((i, j, _)) = best else { break };
-            let from = format!("{} | {}", plan.units[i].action_name, plan.units[j].action_name);
+            let from = format!(
+                "{} | {}",
+                plan.units[i].action_name, plan.units[j].action_name
+            );
             let packed = plan.units[i].action_name.to_string();
             *plan = merged(plan, i, j);
             // The merged unit took unit i's id.
-            let target = plan.units.iter()
+            let target = plan
+                .units
+                .iter()
                 .find(|u| u.action_name.as_str().starts_with(&packed))
-                .map(|u| u.id.to_string()).unwrap_or_default();
+                .map(|u| u.id.to_string())
+                .unwrap_or_default();
             decisions.push(OptimizationDecision {
                 pass: "sibling_fusion".into(),
                 target,
@@ -83,7 +96,9 @@ fn depends_on(plan: &Plan, x: Ustr, y: Ustr) -> bool {
     let mut stack = vec![x];
     let mut seen = HashSet::new();
     while let Some(cur) = stack.pop() {
-        let Some(u) = plan.units.iter().find(|u| u.id == cur) else { continue };
+        let Some(u) = plan.units.iter().find(|u| u.id == cur) else {
+            continue;
+        };
         for n in &u.needs {
             if *n == y {
                 return true;
@@ -147,15 +162,20 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
-    use crate::optimize::{optimize, OptLevel, OptimizeCtx};
+    use crate::ir::{ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder, default_objectives};
+    use crate::optimize::{OptLevel, OptimizeCtx, optimize};
     use crate::profile::Profile;
 
     use crate::ir::Objective;
 
     /// Optimize with an explicit objective order and profile, so we exercise
     /// sibling fusion directly without the parallelization pass adding edges.
-    fn run_with(wf: &Workflow, objectives: Vec<Objective>, profile: &Profile, level: OptLevel) -> Plan {
+    fn run_with(
+        wf: &Workflow,
+        objectives: Vec<Objective>,
+        profile: &Profile,
+        level: OptLevel,
+    ) -> Plan {
         let plan = crate::planner::plan(wf).unwrap();
         let analysis = Analysis::of(wf);
         let ctx = OptimizeCtx {
@@ -202,7 +222,11 @@ mod tests {
         let objs = vec![Objective::DollarCost, Objective::CriticalPath];
         let plan = run_with(&fan_out(3), objs, &priced(), OptLevel::O3);
         assert_eq!(plan.units.len(), 2, "checkout + one packed job");
-        assert!(plan.optimizations.iter().any(|d| d.pass == "sibling_fusion"));
+        assert!(
+            plan.optimizations
+                .iter()
+                .any(|d| d.pass == "sibling_fusion")
+        );
     }
 
     #[test]
@@ -211,7 +235,11 @@ mod tests {
         // makespan, so it must not fire.
         let plan = run_with(&fan_out(3), default_objectives(), &priced(), OptLevel::O3);
         assert_eq!(plan.units.len(), 4, "siblings should stay parallel");
-        assert!(plan.optimizations.iter().all(|d| d.pass != "sibling_fusion"));
+        assert!(
+            plan.optimizations
+                .iter()
+                .all(|d| d.pass != "sibling_fusion")
+        );
     }
 
     #[test]
@@ -237,7 +265,9 @@ mod tests {
         b.actor("r", &["ubuntu-latest"], &[]);
         let objs = vec![Objective::DollarCost, Objective::CriticalPath];
         let plan = run_with(&b.build(), objs, &priced(), OptLevel::O3);
-        assert!(plan.units.iter().any(|u| u.action_name.as_str() == "ship"),
-            "effectful unit must remain unmerged");
+        assert!(
+            plan.units.iter().any(|u| u.action_name.as_str() == "ship"),
+            "effectful unit must remain unmerged"
+        );
     }
 }

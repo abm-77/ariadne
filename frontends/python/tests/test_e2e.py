@@ -132,13 +132,15 @@ def build_release_workflow():
         outputs={"bundle": ReleaseBundle.file("release.tar.gz")},
     )
     def assemble(wheel: Wheel, sig: Signature, sbom: Sbom):
-        return container("alpine:3.20").exec([
-            "mkdir -p release",
-            "cp dist/*.whl release/",
-            "cp dist/wheel.sig release/",
-            "cp sbom.spdx.json release/",
-            "tar -czf release.tar.gz release/",
-        ])
+        return container("alpine:3.20").exec(
+            [
+                "mkdir -p release",
+                "cp dist/*.whl release/",
+                "cp dist/wheel.sig release/",
+                "cp sbom.spdx.json release/",
+                "tar -czf release.tar.gz release/",
+            ]
+        )
 
     @action(
         outputs={},
@@ -199,17 +201,13 @@ class TestE2EValidate:
 
     def test_consequence_metadata_correct(self):
         tir = json.loads(build_release_workflow().emit_json())
-        publish_csq = next(
-            c for c in tir["consequences"] if c["name"] == "publish"
-        )
+        publish_csq = next(c for c in tir["consequences"] if c["name"] == "publish")
         assert publish_csq["kind"] == "PublishRelease"
         assert publish_csq["requires_approval"] is True
 
     def test_secrets_attached_to_action(self):
         tir = json.loads(build_release_workflow().emit_json())
-        publish_call = next(
-            a for a in tir["action_calls"] if a["name"] == "publish"
-        )
+        publish_call = next(a for a in tir["action_calls"] if a["name"] == "publish")
         assert "PYPI_TOKEN" in publish_call.get("secrets", [])
 
 

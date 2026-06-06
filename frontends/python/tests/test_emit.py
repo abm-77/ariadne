@@ -192,14 +192,20 @@ class TestInventory:
 
     def test_inventory_actor_capabilities(self):
         inv = Inventory("ns")
-        inv.actor("r", selector=["self-hosted"], capabilities=["linux", "docker", "cache_mount_access"])
+        inv.actor(
+            "r", selector=["self-hosted"], capabilities=["linux", "docker", "cache_mount_access"]
+        )
 
         @workflow(inventory=inv)
         def ci():
             checkout()
 
         tir = json.loads(ci().emit_json())
-        assert tir["inventory"]["actors"][0]["capabilities"] == ["linux", "docker", "cache_mount_access"]
+        assert tir["inventory"]["actors"][0]["capabilities"] == [
+            "linux",
+            "docker",
+            "cache_mount_access",
+        ]
 
     def test_inventory_actor_empty_capabilities_omitted(self):
         inv = Inventory("ns")
@@ -244,11 +250,7 @@ class TestInventory:
         assert tir["inventory"]["actors"][0]["id"] == "r"
 
     def test_inventory_chaining(self):
-        inv = (
-            Inventory("fleet")
-            .actor("a", selector=["ubuntu"])
-            .actor("b", selector=["macos"])
-        )
+        inv = Inventory("fleet").actor("a", selector=["ubuntu"]).actor("b", selector=["macos"])
 
         @workflow(inventory=inv)
         def ci():
@@ -396,7 +398,17 @@ class TestInventory:
         tir = json.loads(release().emit_json())
         assert tir["inventory"]["id"] == "github-namespace"
         impl_ids = {i["id"] for i in tir["inventory"]["implementations"]}
-        assert impl_ids >= {"git", "python", "rust", "maturin", "uv", "buildkit", "syft", "cosign", "gh"}
+        assert impl_ids >= {
+            "git",
+            "python",
+            "rust",
+            "maturin",
+            "uv",
+            "buildkit",
+            "syft",
+            "cosign",
+            "gh",
+        }
         python_impl = next(i for i in tir["inventory"]["implementations"] if i["id"] == "python")
         assert python_impl["version"] == "3.12"
 
@@ -452,7 +464,9 @@ class TestLoomCompatibility:
 
         @action(
             outputs={},
-            consequences=[Consequence("deploy", ConsequenceKind.Deployment, requires_approval=True)],
+            consequences=[
+                Consequence("deploy", ConsequenceKind.Deployment, requires_approval=True)
+            ],
         )
         def deploy():
             return shell("kubectl apply -f deploy/")

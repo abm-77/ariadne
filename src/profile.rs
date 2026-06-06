@@ -70,8 +70,9 @@ mod tests {
     #[test]
     fn parses_from_json() {
         let p: Profile = serde_json::from_str(
-            r#"{ "artifact_sizes": {"model": 21474836480}, "actor_utilization": {"gpu": 0.95} }"#
-        ).unwrap();
+            r#"{ "artifact_sizes": {"model": 21474836480}, "actor_utilization": {"gpu": 0.95} }"#,
+        )
+        .unwrap();
         assert_eq!(p.artifact_size("model"), Some(21474836480));
         assert_eq!(p.utilization("gpu"), Some(0.95));
     }

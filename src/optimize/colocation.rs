@@ -6,14 +6,18 @@
 
 use super::{OptLevel, OptimizeCtx, Pass};
 use crate::backends::BackendCapabilities;
-use crate::planner::{AccessMode, ExecutionUnit, OptimizationDecision, LogicalOp, Plan};
+use crate::planner::{AccessMode, ExecutionUnit, LogicalOp, OptimizationDecision, Plan};
 use ustr::Ustr;
 
 pub struct ColocationPass;
 
 impl Pass for ColocationPass {
-    fn name(&self) -> &str { "colocation" }
-    fn min_level(&self) -> OptLevel { OptLevel::O2 }
+    fn name(&self) -> &str {
+        "colocation"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O2
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         if !ctx.backend_caps.contains(BackendCapabilities::COLOCATION) {
@@ -21,7 +25,9 @@ impl Pass for ColocationPass {
         }
         let mut decisions = Vec::new();
         for name in copied_artifacts(plan) {
-            let runners: Vec<Ustr> = plan.units.iter()
+            let runners: Vec<Ustr> = plan
+                .units
+                .iter()
                 .filter(|u| touches(u, name))
                 .map(|u| u.runner)
                 .collect();
@@ -31,12 +37,20 @@ impl Pass for ColocationPass {
             }
             for unit in &mut plan.units {
                 let ops = std::mem::take(&mut unit.ops);
-                unit.ops = ops.into_iter().filter_map(|op| match op {
-                    LogicalOp::DownloadArtifact { name: n, path } if n == name =>
-                        Some(LogicalOp::TransferArtifact { name: n, path, access: AccessMode::SameHostPath }),
-                    LogicalOp::UploadArtifact { name: n, .. } if n == name => None,
-                    other => Some(other),
-                }).collect();
+                unit.ops = ops
+                    .into_iter()
+                    .filter_map(|op| match op {
+                        LogicalOp::DownloadArtifact { name: n, path } if n == name => {
+                            Some(LogicalOp::TransferArtifact {
+                                name: n,
+                                path,
+                                access: AccessMode::SameHostPath,
+                            })
+                        }
+                        LogicalOp::UploadArtifact { name: n, .. } if n == name => None,
+                        other => Some(other),
+                    })
+                    .collect();
             }
             decisions.push(OptimizationDecision {
                 pass: "colocation".into(),
@@ -67,7 +81,9 @@ fn copied_artifacts(plan: &Plan) -> Vec<Ustr> {
 
 fn touches(unit: &ExecutionUnit, name: Ustr) -> bool {
     unit.ops.iter().any(|op| match op {
-        LogicalOp::UploadArtifact { name: n, .. } | LogicalOp::DownloadArtifact { name: n, .. } => *n == name,
+        LogicalOp::UploadArtifact { name: n, .. } | LogicalOp::DownloadArtifact { name: n, .. } => {
+            *n == name
+        }
         _ => false,
     })
 }
@@ -76,8 +92,8 @@ fn touches(unit: &ExecutionUnit, name: Ustr) -> bool {
 mod tests {
     use super::*;
     use crate::analysis::Analysis;
-    use crate::ir::{default_objectives, ArtifactType, Workflow, WorkflowBuilder};
-    use crate::optimize::{optimize, OptLevel, OptimizeCtx};
+    use crate::ir::{ArtifactType, Workflow, WorkflowBuilder, default_objectives};
+    use crate::optimize::{OptLevel, OptimizeCtx, optimize};
     use crate::profile::Profile;
 
     fn run(wf: &Workflow, caps: BackendCapabilities, level: OptLevel) -> Plan {
@@ -111,10 +127,19 @@ mod tests {
 
     #[test]
     fn colocated_copy_becomes_same_host_path() {
-        let plan = run(&same_host_wf(), BackendCapabilities::COLOCATION, OptLevel::O2);
+        let plan = run(
+            &same_host_wf(),
+            BackendCapabilities::COLOCATION,
+            OptLevel::O2,
+        );
         assert_eq!(plan.access_mode("src"), Some(AccessMode::SameHostPath));
         let prep = plan.units.iter().find(|u| u.action_name == "prep").unwrap();
-        assert!(!prep.ops.iter().any(|op| matches!(op, LogicalOp::UploadArtifact { .. })));
+        assert!(
+            !prep
+                .ops
+                .iter()
+                .any(|op| matches!(op, LogicalOp::UploadArtifact { .. }))
+        );
         assert!(plan.optimizations.iter().any(|d| d.to == "same_host_path"));
     }
 
@@ -126,7 +151,11 @@ mod tests {
 
     #[test]
     fn only_runs_at_o2() {
-        let plan = run(&same_host_wf(), BackendCapabilities::COLOCATION, OptLevel::O1);
+        let plan = run(
+            &same_host_wf(),
+            BackendCapabilities::COLOCATION,
+            OptLevel::O1,
+        );
         assert_eq!(plan.access_mode("src"), Some(AccessMode::Copy));
     }
 

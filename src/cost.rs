@@ -56,17 +56,33 @@ impl Cost {
         let mut total_dollars = 0.0;
         for u in &plan.units {
             let bytes = unit_transfer_bytes(u, profile);
-            let setup = profile.setup_times.get(u.runner.as_str()).copied().unwrap_or(DEFAULT_JOB_OVERHEAD_SECS);
+            let setup = profile
+                .setup_times
+                .get(u.runner.as_str())
+                .copied()
+                .unwrap_or(DEFAULT_JOB_OVERHEAD_SECS);
             let compute = unit_compute_secs(u, profile);
-            let queue = profile.queue_times.get(u.runner.as_str()).copied().unwrap_or(0.0);
+            let queue = profile
+                .queue_times
+                .get(u.runner.as_str())
+                .copied()
+                .unwrap_or(0.0);
             let dur = setup + compute + queue + bytes as f64 / TRANSFER_BYTES_PER_SEC;
 
-            let rate = profile.runner_costs.get(u.runner.as_str()).copied().unwrap_or(0.0);
+            let rate = profile
+                .runner_costs
+                .get(u.runner.as_str())
+                .copied()
+                .unwrap_or(0.0);
             total_bytes += bytes;
             total_dollars += dur * rate;
             durs.insert(u.id, dur);
         }
-        Cost { seconds: makespan(plan, &durs), transfer_bytes: total_bytes, dollars: total_dollars }
+        Cost {
+            seconds: makespan(plan, &durs),
+            transfer_bytes: total_bytes,
+            dollars: total_dollars,
+        }
     }
 
     /// Compare two costs by the given objective priority order (lexicographic).
@@ -92,19 +108,31 @@ impl Cost {
 /// a fresh slot if one is free, else the earliest-freeing slot; with no cap,
 /// every unit gets its own slot and the makespan equals the critical path.
 fn makespan(plan: &Plan, durs: &HashMap<Ustr, f64>) -> f64 {
-    let m = plan.max_parallel_jobs.filter(|&n| n > 0).unwrap_or(usize::MAX);
+    let m = plan
+        .max_parallel_jobs
+        .filter(|&n| n > 0)
+        .unwrap_or(usize::MAX);
     let mut finish: HashMap<Ustr, f64> = HashMap::new();
     let mut slots: Vec<f64> = Vec::new(); // free-at time of each allocated slot
     for u in &plan.units {
-        let ready = u.needs.iter().filter_map(|n| finish.get(n)).copied().fold(0.0, f64::max);
+        let ready = u
+            .needs
+            .iter()
+            .filter_map(|n| finish.get(n))
+            .copied()
+            .fold(0.0, f64::max);
         let dur = durs.get(&u.id).copied().unwrap_or(0.0);
         let start = if slots.len() < m {
             slots.push(0.0); // a slot we can occupy from `ready`
             ready
         } else {
             // Reuse the earliest-freeing slot (lowest index breaks ties).
-            let idx = slots.iter().enumerate()
-                .min_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(i, _)| i).unwrap();
+            let idx = slots
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.total_cmp(b))
+                .map(|(i, _)| i)
+                .unwrap();
             let start = ready.max(slots[idx]);
             slots[idx] = start + dur;
             finish.insert(u.id, start + dur);
@@ -126,25 +154,36 @@ fn unit_compute_secs(unit: &crate::planner::ExecutionUnit, profile: &Profile) ->
     let mut shell_ops = 0u32;
     for op in &unit.ops {
         if let LogicalOp::RunShell { label, .. } = op {
-            shell_secs += profile.action_duration(label.as_str()).unwrap_or(DEFAULT_ACTION_SECS);
+            shell_secs += profile
+                .action_duration(label.as_str())
+                .unwrap_or(DEFAULT_ACTION_SECS);
             shell_ops += 1;
         }
     }
     if shell_ops > 0 {
         shell_secs
     } else {
-        profile.action_duration(unit.action_name.as_str()).unwrap_or(DEFAULT_ACTION_SECS)
+        profile
+            .action_duration(unit.action_name.as_str())
+            .unwrap_or(DEFAULT_ACTION_SECS)
     }
 }
 
 /// Bytes a unit moves by copy: downloaded artifacts and copy-mode transfers
 /// (mounts, same-host paths and OCI layers move no bytes between units).
 fn unit_transfer_bytes(unit: &crate::planner::ExecutionUnit, profile: &Profile) -> u64 {
-    unit.ops.iter().filter_map(|op| match op {
-        LogicalOp::DownloadArtifact { name, .. } => profile.artifact_size(name.as_str()),
-        LogicalOp::TransferArtifact { name, access: AccessMode::Copy, .. } => profile.artifact_size(name.as_str()),
-        _ => None,
-    }).sum()
+    unit.ops
+        .iter()
+        .filter_map(|op| match op {
+            LogicalOp::DownloadArtifact { name, .. } => profile.artifact_size(name.as_str()),
+            LogicalOp::TransferArtifact {
+                name,
+                access: AccessMode::Copy,
+                ..
+            } => profile.artifact_size(name.as_str()),
+            _ => None,
+        })
+        .sum()
 }
 
 #[cfg(test)]
@@ -155,8 +194,16 @@ mod tests {
 
     #[test]
     fn objective_order_decides_ties() {
-        let a = Cost { seconds: 10.0, transfer_bytes: 100, dollars: 1.0 };
-        let b = Cost { seconds: 10.0, transfer_bytes: 50, dollars: 5.0 };
+        let a = Cost {
+            seconds: 10.0,
+            transfer_bytes: 100,
+            dollars: 1.0,
+        };
+        let b = Cost {
+            seconds: 10.0,
+            transfer_bytes: 50,
+            dollars: 5.0,
+        };
         // Default order: equal time -> fewer bytes wins (b < a).
         assert_eq!(a.cmp_by(&b, &default_objectives()), Ordering::Greater);
         // Dollars-first: a is cheaper -> a < b.
@@ -166,8 +213,16 @@ mod tests {
 
     #[test]
     fn critical_path_dominates() {
-        let a = Cost { seconds: 5.0, transfer_bytes: 999, dollars: 999.0 };
-        let b = Cost { seconds: 9.0, transfer_bytes: 0, dollars: 0.0 };
+        let a = Cost {
+            seconds: 5.0,
+            transfer_bytes: 999,
+            dollars: 999.0,
+        };
+        let b = Cost {
+            seconds: 9.0,
+            transfer_bytes: 0,
+            dollars: 0.0,
+        };
         assert_eq!(a.cmp_by(&b, &default_objectives()), Ordering::Less);
     }
 
@@ -191,7 +246,11 @@ mod tests {
         let cost = Cost::estimate(&plan, &p);
         // Each unit pays the default 10s setup. checkout = 10+10 = 20; build =
         // 10 + src copy(1s) + 20 = 31. Unbounded slots → critical path 20+31 = 51.
-        assert!((cost.seconds - 51.0).abs() < 1e-6, "seconds = {}", cost.seconds);
+        assert!(
+            (cost.seconds - 51.0).abs() < 1e-6,
+            "seconds = {}",
+            cost.seconds
+        );
         assert_eq!(cost.transfer_bytes, 100_000_000);
         assert!(cost.dollars > 0.0);
     }
@@ -210,7 +269,11 @@ mod tests {
         let plan = crate::planner::plan(&b.build()).unwrap();
         // One slot → all three serialize: 3 * 40 = 120.
         let capped = Cost::estimate(&plan, &Profile::default());
-        assert!((capped.seconds - 120.0).abs() < 1e-6, "capped = {}", capped.seconds);
+        assert!(
+            (capped.seconds - 120.0).abs() < 1e-6,
+            "capped = {}",
+            capped.seconds
+        );
     }
 
     #[test]
@@ -225,7 +288,11 @@ mod tests {
         let plan = crate::planner::plan(&b.build()).unwrap();
         // No cap → all three run concurrently: makespan = one job = 40.
         let cost = Cost::estimate(&plan, &Profile::default());
-        assert!((cost.seconds - 40.0).abs() < 1e-6, "seconds = {}", cost.seconds);
+        assert!(
+            (cost.seconds - 40.0).abs() < 1e-6,
+            "seconds = {}",
+            cost.seconds
+        );
     }
 
     #[test]
@@ -237,7 +304,10 @@ mod tests {
         b.actor("r", &["ubuntu-latest"], &[]);
         let plan = crate::planner::plan(&b.build()).unwrap();
         let cost = Cost::estimate(&plan, &Profile::default());
-        assert_eq!(cost.seconds, DEFAULT_ACTION_SECS + DEFAULT_JOB_OVERHEAD_SECS);
+        assert_eq!(
+            cost.seconds,
+            DEFAULT_ACTION_SECS + DEFAULT_JOB_OVERHEAD_SECS
+        );
         assert_eq!(cost.transfer_bytes, 0);
     }
 }

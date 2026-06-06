@@ -11,7 +11,9 @@ pub trait Renderer {
 pub struct YamlRenderer<T>(PhantomData<T>);
 
 impl<T> Default for YamlRenderer<T> {
-    fn default() -> Self { Self(PhantomData) }
+    fn default() -> Self {
+        Self(PhantomData)
+    }
 }
 
 impl<T: Serialize> Renderer for YamlRenderer<T> {
@@ -42,7 +44,9 @@ impl Renderer for BashRenderer {
                 out.push_str(&format!("# {}\n", unit.label));
                 for line in &unit.lines {
                     out.push_str(line);
-                    if !line.ends_with('\n') { out.push('\n'); }
+                    if !line.ends_with('\n') {
+                        out.push('\n');
+                    }
                 }
             }
         }
@@ -57,7 +61,9 @@ mod tests {
     #[test]
     fn yaml_renderer_serializes_struct() {
         #[derive(Serialize)]
-        struct Foo { x: u32 }
+        struct Foo {
+            x: u32,
+        }
         let r = YamlRenderer::default();
         assert_eq!(r.render(&Foo { x: 42 }).trim(), "x: 42");
     }
@@ -65,7 +71,10 @@ mod tests {
     #[test]
     fn bash_renderer_emits_shebang_and_sections() {
         let script = BashScript {
-            units: vec![BashUnit { label: "build".into(), lines: vec!["cargo build".into()] }],
+            units: vec![BashUnit {
+                label: "build".into(),
+                lines: vec!["cargo build".into()],
+            }],
         };
         let out = BashRenderer.render(&script);
         assert!(out.starts_with("#!/usr/bin/env bash"));
@@ -75,7 +84,10 @@ mod tests {
     #[test]
     fn bash_renderer_skips_empty_units() {
         let script = BashScript {
-            units: vec![BashUnit { label: "empty".into(), lines: vec![] }],
+            units: vec![BashUnit {
+                label: "empty".into(),
+                lines: vec![],
+            }],
         };
         let out = BashRenderer.render(&script);
         assert!(!out.contains("# empty"));

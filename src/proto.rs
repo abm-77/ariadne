@@ -4,56 +4,82 @@
 
 use crate::ir;
 use prost::Message;
-use ustr::Ustr;
 use std::path::Path;
+use ustr::Ustr;
 
 /// Protobuf wire types. Hand-written prost messages, mirroring the IR. These
 /// define the binary wire format; .
 pub mod wire {
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Workflow {
-        #[prost(string, tag = "1")] pub name: String,
-        #[prost(message, repeated, tag = "2")] pub artifacts: Vec<Artifact>,
-        #[prost(message, repeated, tag = "3")] pub action_calls: Vec<ActionCall>,
-        #[prost(message, repeated, tag = "4")] pub consequences: Vec<Consequence>,
-        #[prost(message, repeated, tag = "5")] pub placements: Vec<Placement>,
-        #[prost(message, optional, tag = "7")] pub policies: Option<Policies>,
-        #[prost(message, optional, tag = "8")] pub inventory: Option<Inventory>,
-        #[prost(message, repeated, tag = "9")] pub triggers: Vec<Trigger>,
-        #[prost(message, optional, tag = "10")] pub coordination: Option<Coordination>,
+        #[prost(string, tag = "1")]
+        pub name: String,
+        #[prost(message, repeated, tag = "2")]
+        pub artifacts: Vec<Artifact>,
+        #[prost(message, repeated, tag = "3")]
+        pub action_calls: Vec<ActionCall>,
+        #[prost(message, repeated, tag = "4")]
+        pub consequences: Vec<Consequence>,
+        #[prost(message, repeated, tag = "5")]
+        pub placements: Vec<Placement>,
+        #[prost(message, optional, tag = "7")]
+        pub policies: Option<Policies>,
+        #[prost(message, optional, tag = "8")]
+        pub inventory: Option<Inventory>,
+        #[prost(message, repeated, tag = "9")]
+        pub triggers: Vec<Trigger>,
+        #[prost(message, optional, tag = "10")]
+        pub coordination: Option<Coordination>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Inventory {
-        #[prost(string, tag = "1")] pub id: String,
-        #[prost(message, repeated, tag = "2")] pub actors: Vec<Actor>,
-        #[prost(message, repeated, tag = "3")] pub placements: Vec<InventoryPlacement>,
-        #[prost(message, repeated, tag = "4")] pub implementations: Vec<Implementation>,
+        #[prost(string, tag = "1")]
+        pub id: String,
+        #[prost(message, repeated, tag = "2")]
+        pub actors: Vec<Actor>,
+        #[prost(message, repeated, tag = "3")]
+        pub placements: Vec<InventoryPlacement>,
+        #[prost(message, repeated, tag = "4")]
+        pub implementations: Vec<Implementation>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Implementation {
-        #[prost(string, tag = "1")] pub id: String,
-        #[prost(string, optional, tag = "2")] pub version: Option<String>,
-        #[prost(bool, tag = "3")] pub prefer: bool,
-        #[prost(bool, tag = "4")] pub deny: bool,
+        #[prost(string, tag = "1")]
+        pub id: String,
+        #[prost(string, optional, tag = "2")]
+        pub version: Option<String>,
+        #[prost(bool, tag = "3")]
+        pub prefer: bool,
+        #[prost(bool, tag = "4")]
+        pub deny: bool,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct InventoryPlacement {
-        #[prost(string, tag = "1")] pub id: String,
-        #[prost(string, tag = "2")] pub kind: String,
-        #[prost(string, repeated, tag = "3")] pub access_modes: Vec<String>,
-        #[prost(string, repeated, tag = "4")] pub accessible_by: Vec<String>,
+        #[prost(string, tag = "1")]
+        pub id: String,
+        #[prost(string, tag = "2")]
+        pub kind: String,
+        #[prost(string, repeated, tag = "3")]
+        pub access_modes: Vec<String>,
+        #[prost(string, repeated, tag = "4")]
+        pub accessible_by: Vec<String>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Artifact {
-        #[prost(string, tag = "1")] pub name: String,
-        #[prost(message, optional, tag = "2")] pub ty: Option<ArtifactType>,
-        #[prost(uint32, optional, tag = "3")] pub producer: Option<u32>,
-        #[prost(string, optional, tag = "4")] pub path: Option<String>,
-        #[prost(string, optional, tag = "5")] pub lifetime: Option<String>,
+        #[prost(string, tag = "1")]
+        pub name: String,
+        #[prost(message, optional, tag = "2")]
+        pub ty: Option<ArtifactType>,
+        #[prost(uint32, optional, tag = "3")]
+        pub producer: Option<u32>,
+        #[prost(string, optional, tag = "4")]
+        pub path: Option<String>,
+        #[prost(string, optional, tag = "5")]
+        pub lifetime: Option<String>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -64,8 +90,10 @@ pub mod wire {
     pub mod artifact_type {
         #[derive(Clone, PartialEq, ::prost::Oneof)]
         pub enum Kind {
-            #[prost(enumeration = "super::BuiltinArtifactType", tag = "1")] Builtin(i32),
-            #[prost(string, tag = "2")] Custom(String),
+            #[prost(enumeration = "super::BuiltinArtifactType", tag = "1")]
+            Builtin(i32),
+            #[prost(string, tag = "2")]
+            Custom(String),
         }
     }
 
@@ -89,9 +117,12 @@ pub mod wire {
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Consequence {
-        #[prost(string, tag = "1")] pub name: String,
-        #[prost(message, optional, tag = "2")] pub kind: Option<ConsequenceKind>,
-        #[prost(bool, tag = "3")] pub requires_approval: bool,
+        #[prost(string, tag = "1")]
+        pub name: String,
+        #[prost(message, optional, tag = "2")]
+        pub kind: Option<ConsequenceKind>,
+        #[prost(bool, tag = "3")]
+        pub requires_approval: bool,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -102,8 +133,10 @@ pub mod wire {
     pub mod effect_kind {
         #[derive(Clone, PartialEq, ::prost::Oneof)]
         pub enum Kind {
-            #[prost(enumeration = "super::BuiltinConsequenceKind", tag = "1")] Builtin(i32),
-            #[prost(string, tag = "2")] Custom(String),
+            #[prost(enumeration = "super::BuiltinConsequenceKind", tag = "1")]
+            Builtin(i32),
+            #[prost(string, tag = "2")]
+            Custom(String),
         }
     }
 
@@ -121,16 +154,22 @@ pub mod wire {
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Actor {
-        #[prost(string, tag = "1")] pub id: String,
-        #[prost(string, repeated, tag = "2")] pub labels: Vec<String>,
-        #[prost(string, repeated, tag = "3")] pub capabilities: Vec<String>,
-        #[prost(message, optional, tag = "4")] pub resources: Option<Resources>,
+        #[prost(string, tag = "1")]
+        pub id: String,
+        #[prost(string, repeated, tag = "2")]
+        pub labels: Vec<String>,
+        #[prost(string, repeated, tag = "3")]
+        pub capabilities: Vec<String>,
+        #[prost(message, optional, tag = "4")]
+        pub resources: Option<Resources>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Placement {
-        #[prost(uint32, tag = "1")] pub artifact: u32,
-        #[prost(message, optional, tag = "2")] pub strategy: Option<PlacementStrategy>,
+        #[prost(uint32, tag = "1")]
+        pub artifact: u32,
+        #[prost(message, optional, tag = "2")]
+        pub strategy: Option<PlacementStrategy>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -141,26 +180,42 @@ pub mod wire {
     pub mod placement_strategy {
         #[derive(Clone, PartialEq, ::prost::Oneof)]
         pub enum Strategy {
-            #[prost(message, tag = "1")] GithubArtifact(super::Unit),
-            #[prost(message, tag = "2")] SharedVolume(super::SharedVolume),
-            #[prost(message, tag = "3")] PersistentCache(super::PersistentCache),
-            #[prost(message, tag = "4")] LocalPath(super::LocalPath),
-            #[prost(message, tag = "5")] OciRegistry(super::OciRegistry),
+            #[prost(message, tag = "1")]
+            GithubArtifact(super::Unit),
+            #[prost(message, tag = "2")]
+            SharedVolume(super::SharedVolume),
+            #[prost(message, tag = "3")]
+            PersistentCache(super::PersistentCache),
+            #[prost(message, tag = "4")]
+            LocalPath(super::LocalPath),
+            #[prost(message, tag = "5")]
+            OciRegistry(super::OciRegistry),
         }
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Unit {}
     #[derive(Clone, PartialEq, ::prost::Message)]
-    pub struct SharedVolume { #[prost(string, tag = "1")] pub path: String }
+    pub struct SharedVolume {
+        #[prost(string, tag = "1")]
+        pub path: String,
+    }
     #[derive(Clone, PartialEq, ::prost::Message)]
-    pub struct PersistentCache { #[prost(string, tag = "1")] pub key: String }
+    pub struct PersistentCache {
+        #[prost(string, tag = "1")]
+        pub key: String,
+    }
     #[derive(Clone, PartialEq, ::prost::Message)]
-    pub struct LocalPath { #[prost(string, tag = "1")] pub path: String }
+    pub struct LocalPath {
+        #[prost(string, tag = "1")]
+        pub path: String,
+    }
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct OciRegistry {
-        #[prost(string, tag = "1")] pub registry: String,
-        #[prost(string, tag = "2")] pub tag: String,
+        #[prost(string, tag = "1")]
+        pub registry: String,
+        #[prost(string, tag = "2")]
+        pub tag: String,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -171,8 +226,10 @@ pub mod wire {
     pub mod actor_constraint {
         #[derive(Clone, PartialEq, ::prost::Oneof)]
         pub enum Constraint {
-            #[prost(uint32, tag = "1")] Specific(u32),
-            #[prost(string, tag = "2")] Label(String),
+            #[prost(uint32, tag = "1")]
+            Specific(u32),
+            #[prost(string, tag = "2")]
+            Label(String),
         }
     }
 
@@ -188,24 +245,38 @@ pub mod wire {
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct ShellAction {
-        #[prost(string, tag = "1")] pub script: String,
-        #[prost(map = "string, string", tag = "2")] pub env: ::std::collections::HashMap<String, String>,
-        #[prost(enumeration = "CaptureRule", tag = "3")] pub capture: i32,
+        #[prost(string, tag = "1")]
+        pub script: String,
+        #[prost(map = "string, string", tag = "2")]
+        pub env: ::std::collections::HashMap<String, String>,
+        #[prost(enumeration = "CaptureRule", tag = "3")]
+        pub capture: i32,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct ActionCall {
-        #[prost(string, tag = "1")] pub name: String,
-        #[prost(string, tag = "2")] pub op: String,
-        #[prost(uint32, repeated, tag = "3")] pub inputs: Vec<u32>,
-        #[prost(uint32, repeated, tag = "4")] pub outputs: Vec<u32>,
-        #[prost(uint32, repeated, tag = "5")] pub consequences: Vec<u32>,
-        #[prost(string, repeated, tag = "6")] pub secrets: Vec<String>,
-        #[prost(message, repeated, tag = "7")] pub actor_constraints: Vec<ActorConstraint>,
-        #[prost(message, optional, tag = "8")] pub shell: Option<ShellAction>,
-        #[prost(string, optional, tag = "9")] pub timeout: Option<String>,
-        #[prost(message, optional, tag = "10")] pub coordination: Option<Coordination>,
-        #[prost(message, optional, tag = "11")] pub resources: Option<Resources>,
+        #[prost(string, tag = "1")]
+        pub name: String,
+        #[prost(string, tag = "2")]
+        pub op: String,
+        #[prost(uint32, repeated, tag = "3")]
+        pub inputs: Vec<u32>,
+        #[prost(uint32, repeated, tag = "4")]
+        pub outputs: Vec<u32>,
+        #[prost(uint32, repeated, tag = "5")]
+        pub consequences: Vec<u32>,
+        #[prost(string, repeated, tag = "6")]
+        pub secrets: Vec<String>,
+        #[prost(message, repeated, tag = "7")]
+        pub actor_constraints: Vec<ActorConstraint>,
+        #[prost(message, optional, tag = "8")]
+        pub shell: Option<ShellAction>,
+        #[prost(string, optional, tag = "9")]
+        pub timeout: Option<String>,
+        #[prost(message, optional, tag = "10")]
+        pub coordination: Option<Coordination>,
+        #[prost(message, optional, tag = "11")]
+        pub resources: Option<Resources>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -216,36 +287,50 @@ pub mod wire {
     pub mod trigger {
         #[derive(Clone, PartialEq, ::prost::Oneof)]
         pub enum Kind {
-            #[prost(message, tag = "1")] PullRequest(super::Unit),
-            #[prost(message, tag = "2")] Push(super::PushTrigger),
-            #[prost(string, tag = "3")] Tag(String),
-            #[prost(string, tag = "4")] Schedule(String),
-            #[prost(message, tag = "5")] Manual(super::Unit),
+            #[prost(message, tag = "1")]
+            PullRequest(super::Unit),
+            #[prost(message, tag = "2")]
+            Push(super::PushTrigger),
+            #[prost(string, tag = "3")]
+            Tag(String),
+            #[prost(string, tag = "4")]
+            Schedule(String),
+            #[prost(message, tag = "5")]
+            Manual(super::Unit),
         }
     }
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct PushTrigger {
-        #[prost(string, repeated, tag = "1")] pub branches: Vec<String>,
+        #[prost(string, repeated, tag = "1")]
+        pub branches: Vec<String>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Coordination {
-        #[prost(string, tag = "1")] pub group: String,
-        #[prost(bool, tag = "2")] pub cancel_in_progress: bool,
+        #[prost(string, tag = "1")]
+        pub group: String,
+        #[prost(bool, tag = "2")]
+        pub cancel_in_progress: bool,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Resources {
-        #[prost(uint32, optional, tag = "1")] pub cpu: Option<u32>,
-        #[prost(string, optional, tag = "2")] pub memory: Option<String>,
-        #[prost(string, optional, tag = "3")] pub disk: Option<String>,
-        #[prost(uint32, optional, tag = "4")] pub gpu: Option<u32>,
+        #[prost(uint32, optional, tag = "1")]
+        pub cpu: Option<u32>,
+        #[prost(string, optional, tag = "2")]
+        pub memory: Option<String>,
+        #[prost(string, optional, tag = "3")]
+        pub disk: Option<String>,
+        #[prost(uint32, optional, tag = "4")]
+        pub gpu: Option<u32>,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Policies {
-        #[prost(uint32, optional, tag = "1")] pub max_parallel_jobs: Option<u32>,
-        #[prost(enumeration = "Objective", repeated, tag = "2")] pub objectives: Vec<i32>,
+        #[prost(uint32, optional, tag = "1")]
+        pub max_parallel_jobs: Option<u32>,
+        #[prost(enumeration = "Objective", repeated, tag = "2")]
+        pub objectives: Vec<i32>,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, ::prost::Enumeration)]
@@ -288,7 +373,9 @@ impl std::fmt::Display for CodecError {
             CodecError::Decode(e) => write!(f, "protobuf decode error: {e}"),
             CodecError::Json(e) => write!(f, "json error: {e}"),
             CodecError::Io(e) => write!(f, "io error: {e}"),
-            CodecError::UnknownExtension(p) => write!(f, "unknown TIR extension for '{p}' (expected .pb/.json)"),
+            CodecError::UnknownExtension(p) => {
+                write!(f, "unknown TIR extension for '{p}' (expected .pb/.json)")
+            }
         }
     }
 }
@@ -334,7 +421,12 @@ pub fn to_wire(wf: &ir::Workflow) -> wire::Workflow {
         placements: wf.placements.iter().map(placement_to).collect(),
         policies: Some(wire::Policies {
             max_parallel_jobs: wf.policies.max_parallel_jobs.map(|n| n as u32),
-            objectives: wf.policies.objectives.iter().map(|o| objective_to(o) as i32).collect(),
+            objectives: wf
+                .policies
+                .objectives
+                .iter()
+                .map(|o| objective_to(o) as i32)
+                .collect(),
         }),
         inventory: wf.inventory.as_ref().map(inventory_to),
         triggers: wf.triggers.iter().map(trigger_to).collect(),
@@ -351,12 +443,27 @@ pub fn from_wire(m: &wire::Workflow) -> ir::Workflow {
         placements: m.placements.iter().map(placement_from).collect(),
         inventory: m.inventory.as_ref().map(inventory_from),
         policies: ir::Policies {
-            max_parallel_jobs: m.policies.as_ref().and_then(|p| p.max_parallel_jobs).map(|n| n as usize),
+            max_parallel_jobs: m
+                .policies
+                .as_ref()
+                .and_then(|p| p.max_parallel_jobs)
+                .map(|n| n as usize),
             objectives: {
-                let objs: Vec<ir::Objective> = m.policies.as_ref()
-                    .map(|p| p.objectives.iter().filter_map(|&i| objective_from(i)).collect())
+                let objs: Vec<ir::Objective> = m
+                    .policies
+                    .as_ref()
+                    .map(|p| {
+                        p.objectives
+                            .iter()
+                            .filter_map(|&i| objective_from(i))
+                            .collect()
+                    })
                     .unwrap_or_default();
-                if objs.is_empty() { ir::default_objectives() } else { objs }
+                if objs.is_empty() {
+                    ir::default_objectives()
+                } else {
+                    objs
+                }
             },
             // Not carried on the binary wire; JSON TIR carries it via serde.
             install_dependencies: false,
@@ -413,8 +520,16 @@ fn inv_placement_from(m: &wire::InventoryPlacement) -> ir::InventoryPlacement {
     ir::InventoryPlacement {
         id: Ustr::from(m.id.as_str()),
         kind: Ustr::from(m.kind.as_str()),
-        access_modes: m.access_modes.iter().map(|s| Ustr::from(s.as_str())).collect(),
-        accessible_by: m.accessible_by.iter().map(|s| Ustr::from(s.as_str())).collect(),
+        access_modes: m
+            .access_modes
+            .iter()
+            .map(|s| Ustr::from(s.as_str()))
+            .collect(),
+        accessible_by: m
+            .accessible_by
+            .iter()
+            .map(|s| Ustr::from(s.as_str()))
+            .collect(),
     }
 }
 
@@ -446,7 +561,11 @@ fn artifact_to(a: &ir::Artifact) -> wire::Artifact {
 fn artifact_from(m: &wire::Artifact) -> ir::Artifact {
     ir::Artifact {
         name: ustr::Ustr::from(m.name.as_str()),
-        ty: m.ty.as_ref().map(artifact_type_from).unwrap_or(ir::ArtifactType::SourceTree),
+        ty: m
+            .ty
+            .as_ref()
+            .map(artifact_type_from)
+            .unwrap_or(ir::ArtifactType::SourceTree),
         producer: m.producer.map(ir::ActionCallId),
         path: m.path.clone(),
         lifetime: m.lifetime.clone(),
@@ -454,9 +573,9 @@ fn artifact_from(m: &wire::Artifact) -> ir::Artifact {
 }
 
 fn artifact_type_to(t: &ir::ArtifactType) -> wire::ArtifactType {
-    use wire::artifact_type::Kind;
-    use wire::BuiltinArtifactType as B;
     use ir::ArtifactType as A;
+    use wire::BuiltinArtifactType as B;
+    use wire::artifact_type::Kind;
     let kind = match t {
         A::Custom(s) => Kind::Custom(s.clone()),
         A::SourceTree => Kind::Builtin(B::SourceTree as i32),
@@ -475,9 +594,9 @@ fn artifact_type_to(t: &ir::ArtifactType) -> wire::ArtifactType {
     wire::ArtifactType { kind: Some(kind) }
 }
 fn artifact_type_from(m: &wire::ArtifactType) -> ir::ArtifactType {
-    use wire::artifact_type::Kind;
-    use wire::BuiltinArtifactType as B;
     use ir::ArtifactType as A;
+    use wire::BuiltinArtifactType as B;
+    use wire::artifact_type::Kind;
     match &m.kind {
         Some(Kind::Custom(s)) => A::Custom(s.clone()),
         Some(Kind::Builtin(i)) => match B::try_from(*i).unwrap_or(B::Unspecified) {
@@ -499,19 +618,27 @@ fn artifact_type_from(m: &wire::ArtifactType) -> ir::ArtifactType {
 }
 
 fn effect_to(e: &ir::Consequence) -> wire::Consequence {
-    wire::Consequence { name: e.name.to_string(), kind: Some(effect_kind_to(&e.kind)), requires_approval: e.requires_approval }
+    wire::Consequence {
+        name: e.name.to_string(),
+        kind: Some(effect_kind_to(&e.kind)),
+        requires_approval: e.requires_approval,
+    }
 }
 fn effect_from(m: &wire::Consequence) -> ir::Consequence {
     ir::Consequence {
         name: Ustr::from(m.name.as_str()),
-        kind: m.kind.as_ref().map(effect_kind_from).unwrap_or(ir::ConsequenceKind::Network),
+        kind: m
+            .kind
+            .as_ref()
+            .map(effect_kind_from)
+            .unwrap_or(ir::ConsequenceKind::Network),
         requires_approval: m.requires_approval,
     }
 }
 fn effect_kind_to(k: &ir::ConsequenceKind) -> wire::ConsequenceKind {
-    use wire::effect_kind::Kind;
-    use wire::BuiltinConsequenceKind as B;
     use ir::ConsequenceKind as E;
+    use wire::BuiltinConsequenceKind as B;
+    use wire::effect_kind::Kind;
     let kind = match k {
         E::Custom(s) => Kind::Custom(s.clone()),
         E::Network => Kind::Builtin(B::Network as i32),
@@ -524,9 +651,9 @@ fn effect_kind_to(k: &ir::ConsequenceKind) -> wire::ConsequenceKind {
     wire::ConsequenceKind { kind: Some(kind) }
 }
 fn effect_kind_from(m: &wire::ConsequenceKind) -> ir::ConsequenceKind {
-    use wire::effect_kind::Kind;
-    use wire::BuiltinConsequenceKind as B;
     use ir::ConsequenceKind as E;
+    use wire::BuiltinConsequenceKind as B;
+    use wire::effect_kind::Kind;
     match &m.kind {
         Some(Kind::Custom(s)) => E::Custom(s.clone()),
         Some(Kind::Builtin(i)) => match B::try_from(*i).unwrap_or(B::Unspecified) {
@@ -553,41 +680,67 @@ fn actor_from(m: &wire::Actor) -> ir::Actor {
     ir::Actor {
         id: Ustr::from(m.id.as_str()),
         labels: m.labels.iter().map(|s| Ustr::from(s.as_str())).collect(),
-        capabilities: m.capabilities.iter().map(|s| Ustr::from(s.as_str())).collect(),
+        capabilities: m
+            .capabilities
+            .iter()
+            .map(|s| Ustr::from(s.as_str()))
+            .collect(),
         resources: m.resources.as_ref().map(resources_from),
     }
 }
 
 fn placement_to(p: &ir::Placement) -> wire::Placement {
-    wire::Placement { artifact: p.artifact.0, strategy: Some(placement_strategy_to(&p.strategy)) }
+    wire::Placement {
+        artifact: p.artifact.0,
+        strategy: Some(placement_strategy_to(&p.strategy)),
+    }
 }
 fn placement_from(m: &wire::Placement) -> ir::Placement {
     ir::Placement {
         artifact: ir::ArtifactId(m.artifact),
-        strategy: m.strategy.as_ref().map(placement_strategy_from).unwrap_or(ir::PlacementStrategy::GithubArtifact),
+        strategy: m
+            .strategy
+            .as_ref()
+            .map(placement_strategy_from)
+            .unwrap_or(ir::PlacementStrategy::GithubArtifact),
     }
 }
 fn placement_strategy_to(s: &ir::PlacementStrategy) -> wire::PlacementStrategy {
-    use wire::placement_strategy::Strategy;
     use ir::PlacementStrategy as P;
+    use wire::placement_strategy::Strategy;
     let strategy = match s {
         P::GithubArtifact => Strategy::GithubArtifact(wire::Unit {}),
-        P::SharedVolume { path } => Strategy::SharedVolume(wire::SharedVolume { path: path.clone() }),
-        P::PersistentCache { key } => Strategy::PersistentCache(wire::PersistentCache { key: key.clone() }),
+        P::SharedVolume { path } => {
+            Strategy::SharedVolume(wire::SharedVolume { path: path.clone() })
+        }
+        P::PersistentCache { key } => {
+            Strategy::PersistentCache(wire::PersistentCache { key: key.clone() })
+        }
         P::LocalPath { path } => Strategy::LocalPath(wire::LocalPath { path: path.clone() }),
-        P::OciRegistry { registry, tag } =>
-            Strategy::OciRegistry(wire::OciRegistry { registry: registry.clone(), tag: tag.clone() }),
+        P::OciRegistry { registry, tag } => Strategy::OciRegistry(wire::OciRegistry {
+            registry: registry.clone(),
+            tag: tag.clone(),
+        }),
     };
-    wire::PlacementStrategy { strategy: Some(strategy) }
+    wire::PlacementStrategy {
+        strategy: Some(strategy),
+    }
 }
 fn placement_strategy_from(m: &wire::PlacementStrategy) -> ir::PlacementStrategy {
-    use wire::placement_strategy::Strategy;
     use ir::PlacementStrategy as P;
+    use wire::placement_strategy::Strategy;
     match &m.strategy {
-        Some(Strategy::SharedVolume(v)) => P::SharedVolume { path: v.path.clone() },
+        Some(Strategy::SharedVolume(v)) => P::SharedVolume {
+            path: v.path.clone(),
+        },
         Some(Strategy::PersistentCache(v)) => P::PersistentCache { key: v.key.clone() },
-        Some(Strategy::LocalPath(v)) => P::LocalPath { path: v.path.clone() },
-        Some(Strategy::OciRegistry(v)) => P::OciRegistry { registry: v.registry.clone(), tag: v.tag.clone() },
+        Some(Strategy::LocalPath(v)) => P::LocalPath {
+            path: v.path.clone(),
+        },
+        Some(Strategy::OciRegistry(v)) => P::OciRegistry {
+            registry: v.registry.clone(),
+            tag: v.tag.clone(),
+        },
         _ => P::GithubArtifact,
     }
 }
@@ -600,7 +753,11 @@ fn action_to(a: &ir::ActionCall) -> wire::ActionCall {
         outputs: a.outputs.iter().map(|id| id.0).collect(),
         consequences: a.consequences.iter().map(|id| id.0).collect(),
         secrets: a.secrets.iter().map(|s| s.to_string()).collect(),
-        actor_constraints: a.actor_constraints.iter().map(actor_constraint_to).collect(),
+        actor_constraints: a
+            .actor_constraints
+            .iter()
+            .map(actor_constraint_to)
+            .collect(),
         shell: a.shell.as_ref().map(shell_to),
         timeout: a.timeout.clone(),
         coordination: a.coordination.as_ref().map(coordination_to),
@@ -613,9 +770,17 @@ fn action_from(m: &wire::ActionCall) -> ir::ActionCall {
         action: Ustr::from(m.op.as_str()),
         inputs: m.inputs.iter().map(|&i| ir::ArtifactId(i)).collect(),
         outputs: m.outputs.iter().map(|&i| ir::ArtifactId(i)).collect(),
-        consequences: m.consequences.iter().map(|&i| ir::ConsequenceId(i)).collect(),
+        consequences: m
+            .consequences
+            .iter()
+            .map(|&i| ir::ConsequenceId(i))
+            .collect(),
         secrets: m.secrets.iter().map(|s| Ustr::from(s.as_str())).collect(),
-        actor_constraints: m.actor_constraints.iter().map(actor_constraint_from).collect(),
+        actor_constraints: m
+            .actor_constraints
+            .iter()
+            .map(actor_constraint_from)
+            .collect(),
         shell: m.shell.as_ref().map(shell_from),
         timeout: m.timeout.clone(),
         coordination: m.coordination.as_ref().map(coordination_from),
@@ -627,8 +792,9 @@ fn trigger_to(t: &ir::Trigger) -> wire::Trigger {
     use wire::trigger::Kind;
     let kind = match t {
         ir::Trigger::PullRequest => Kind::PullRequest(wire::Unit {}),
-        ir::Trigger::Push { branches } =>
-            Kind::Push(wire::PushTrigger { branches: branches.clone() }),
+        ir::Trigger::Push { branches } => Kind::Push(wire::PushTrigger {
+            branches: branches.clone(),
+        }),
         ir::Trigger::Tag { pattern } => Kind::Tag(pattern.clone()),
         ir::Trigger::Schedule { cron } => Kind::Schedule(cron.clone()),
         ir::Trigger::Manual => Kind::Manual(wire::Unit {}),
@@ -639,18 +805,28 @@ fn trigger_from(m: &wire::Trigger) -> Option<ir::Trigger> {
     use wire::trigger::Kind;
     Some(match m.kind.as_ref()? {
         Kind::PullRequest(_) => ir::Trigger::PullRequest,
-        Kind::Push(p) => ir::Trigger::Push { branches: p.branches.clone() },
-        Kind::Tag(pattern) => ir::Trigger::Tag { pattern: pattern.clone() },
+        Kind::Push(p) => ir::Trigger::Push {
+            branches: p.branches.clone(),
+        },
+        Kind::Tag(pattern) => ir::Trigger::Tag {
+            pattern: pattern.clone(),
+        },
         Kind::Schedule(cron) => ir::Trigger::Schedule { cron: cron.clone() },
         Kind::Manual(_) => ir::Trigger::Manual,
     })
 }
 
 fn coordination_to(c: &ir::Coordination) -> wire::Coordination {
-    wire::Coordination { group: c.group.clone(), cancel_in_progress: c.cancel_in_progress }
+    wire::Coordination {
+        group: c.group.clone(),
+        cancel_in_progress: c.cancel_in_progress,
+    }
 }
 fn coordination_from(m: &wire::Coordination) -> ir::Coordination {
-    ir::Coordination { group: m.group.clone(), cancel_in_progress: m.cancel_in_progress }
+    ir::Coordination {
+        group: m.group.clone(),
+        cancel_in_progress: m.cancel_in_progress,
+    }
 }
 
 fn resources_to(r: &ir::Resources) -> wire::Resources {
@@ -676,7 +852,9 @@ fn actor_constraint_to(c: &ir::ActorConstraint) -> wire::ActorConstraint {
         ir::ActorConstraint::Specific(id) => Constraint::Specific(id.0),
         ir::ActorConstraint::Label(l) => Constraint::Label(l.to_string()),
     };
-    wire::ActorConstraint { constraint: Some(constraint) }
+    wire::ActorConstraint {
+        constraint: Some(constraint),
+    }
 }
 fn actor_constraint_from(m: &wire::ActorConstraint) -> ir::ActorConstraint {
     use wire::actor_constraint::Constraint;
@@ -688,13 +866,19 @@ fn actor_constraint_from(m: &wire::ActorConstraint) -> ir::ActorConstraint {
 }
 
 fn shell_to(s: &ir::ShellAction) -> wire::ShellAction {
-    wire::ShellAction { script: s.script.clone(), env: s.env.clone(), capture: capture_to(&s.capture) as i32 }
+    wire::ShellAction {
+        script: s.script.clone(),
+        env: s.env.clone(),
+        capture: capture_to(&s.capture) as i32,
+    }
 }
 fn shell_from(m: &wire::ShellAction) -> ir::ShellAction {
     ir::ShellAction {
         script: m.script.clone(),
         env: m.env.clone(),
-        capture: wire::CaptureRule::try_from(m.capture).map(capture_from).unwrap_or(ir::CaptureRule::NoCapture),
+        capture: wire::CaptureRule::try_from(m.capture)
+            .map(capture_from)
+            .unwrap_or(ir::CaptureRule::NoCapture),
     }
 }
 fn capture_to(c: &ir::CaptureRule) -> wire::CaptureRule {
@@ -734,41 +918,85 @@ mod tests {
         b.consequence("fx", ConsequenceKind::Custom("weird-fx".into()), false);
         let actor = b.actor("big", &["self-hosted"], &["mount", "gpu"]);
         b.constrain_actor(checkout, actor);
-        b.place(src, PlacementStrategy::SharedVolume { path: "/vol".into() });
-        b.place(bin, PlacementStrategy::OciRegistry { registry: "ghcr.io".into(), tag: "v1".into() });
+        b.place(
+            src,
+            PlacementStrategy::SharedVolume {
+                path: "/vol".into(),
+            },
+        );
+        b.place(
+            bin,
+            PlacementStrategy::OciRegistry {
+                registry: "ghcr.io".into(),
+                tag: "v1".into(),
+            },
+        );
         b.max_parallel_jobs(4);
         b.implementation("git", None, false, false);
         b.implementation("maturin", Some("1.7"), true, false);
         b.implementation("docker", None, false, true);
         let mut wf = b.build();
         wf.triggers = vec![
-            Trigger::Push { branches: vec!["main".into()] },
-            Trigger::Tag { pattern: "v*".into() },
+            Trigger::Push {
+                branches: vec!["main".into()],
+            },
+            Trigger::Tag {
+                pattern: "v*".into(),
+            },
             Trigger::Manual,
         ];
-        wf.coordination = Some(Coordination { group: "release".into(), cancel_in_progress: true });
+        wf.coordination = Some(Coordination {
+            group: "release".into(),
+            cancel_in_progress: true,
+        });
         wf.artifacts[bin.idx()].lifetime = Some("14d".into());
         wf.action_calls[build.idx()].timeout = Some("30m".into());
-        wf.action_calls[build.idx()].coordination =
-            Some(Coordination { group: "prod".into(), cancel_in_progress: false });
-        wf.action_calls[build.idx()].resources =
-            Some(Resources { cpu: Some(8), memory: Some("32Gi".into()), disk: None, gpu: Some(1) });
-        wf.inventory.as_mut().unwrap().actors[0].resources =
-            Some(Resources { cpu: Some(16), ..Default::default() });
+        wf.action_calls[build.idx()].coordination = Some(Coordination {
+            group: "prod".into(),
+            cancel_in_progress: false,
+        });
+        wf.action_calls[build.idx()].resources = Some(Resources {
+            cpu: Some(8),
+            memory: Some("32Gi".into()),
+            disk: None,
+            gpu: Some(1),
+        });
+        wf.inventory.as_mut().unwrap().actors[0].resources = Some(Resources {
+            cpu: Some(16),
+            ..Default::default()
+        });
         wf
     }
 
     fn check(back: &Workflow) {
         assert_eq!(back.artifacts[2].ty, ArtifactType::Custom("thing".into()));
         assert_eq!(back.artifacts[1].producer, Some(ActionCallId(1)));
-        assert_eq!(back.artifacts[1].path.as_deref(), Some("target/release/app"));
-        assert_eq!(back.action_calls[1].secrets, vec!["TOKEN".to_string(), "KEY".to_string()]);
-        assert!(matches!(back.action_calls[0].actor_constraints[0], ActorConstraint::Specific(ActorId(0))));
+        assert_eq!(
+            back.artifacts[1].path.as_deref(),
+            Some("target/release/app")
+        );
+        assert_eq!(
+            back.action_calls[1].secrets,
+            vec!["TOKEN".to_string(), "KEY".to_string()]
+        );
+        assert!(matches!(
+            back.action_calls[0].actor_constraints[0],
+            ActorConstraint::Specific(ActorId(0))
+        ));
         assert_eq!(back.consequences[0].kind, ConsequenceKind::Deployment);
         assert!(back.consequences[0].requires_approval);
-        assert_eq!(back.consequences[1].kind, ConsequenceKind::Custom("weird-fx".into()));
-        assert_eq!(back.inventory.as_ref().unwrap().actors[0].capabilities, vec!["mount".to_string(), "gpu".to_string()]);
-        assert!(matches!(back.placements[1].strategy, PlacementStrategy::OciRegistry { .. }));
+        assert_eq!(
+            back.consequences[1].kind,
+            ConsequenceKind::Custom("weird-fx".into())
+        );
+        assert_eq!(
+            back.inventory.as_ref().unwrap().actors[0].capabilities,
+            vec!["mount".to_string(), "gpu".to_string()]
+        );
+        assert!(matches!(
+            back.placements[1].strategy,
+            PlacementStrategy::OciRegistry { .. }
+        ));
         assert_eq!(back.policies.max_parallel_jobs, Some(4));
         let impls = &back.inventory.as_ref().unwrap().implementations;
         assert_eq!(impls[0].id.as_str(), "git");
@@ -785,12 +1013,22 @@ mod tests {
         assert!(back.coordination.as_ref().unwrap().cancel_in_progress);
         assert_eq!(back.artifacts[1].lifetime.as_deref(), Some("14d"));
         assert_eq!(back.action_calls[1].timeout.as_deref(), Some("30m"));
-        assert_eq!(back.action_calls[1].coordination.as_ref().unwrap().group, "prod");
+        assert_eq!(
+            back.action_calls[1].coordination.as_ref().unwrap().group,
+            "prod"
+        );
         let res = back.action_calls[1].resources.as_ref().unwrap();
         assert_eq!(res.cpu, Some(8));
         assert_eq!(res.memory.as_deref(), Some("32Gi"));
         assert_eq!(res.gpu, Some(1));
-        assert_eq!(back.inventory.as_ref().unwrap().actors[0].resources.as_ref().unwrap().cpu, Some(16));
+        assert_eq!(
+            back.inventory.as_ref().unwrap().actors[0]
+                .resources
+                .as_ref()
+                .unwrap()
+                .cpu,
+            Some(16)
+        );
     }
 
     #[test]
@@ -814,8 +1052,14 @@ mod tests {
 
     #[test]
     fn format_by_extension() {
-        assert_eq!(Format::from_extension(Path::new("a.pb")), Some(Format::Binary));
-        assert_eq!(Format::from_extension(Path::new("a.json")), Some(Format::Json));
+        assert_eq!(
+            Format::from_extension(Path::new("a.pb")),
+            Some(Format::Binary)
+        );
+        assert_eq!(
+            Format::from_extension(Path::new("a.json")),
+            Some(Format::Json)
+        );
         assert_eq!(Format::from_extension(Path::new("a.txt")), None);
     }
 }

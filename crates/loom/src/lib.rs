@@ -4,8 +4,7 @@ use std::path::Path;
 /// Load a TIR document. The format is chosen by extension: `.pb` (protobuf
 /// binary) or `.json` (serde JSON of the IR).
 pub fn load_workflow(path: &Path) -> Result<ariadne::ir::Workflow, String> {
-    ariadne::proto::load(path)
-        .map_err(|e| format!("cannot load '{}': {e}", path.display()))
+    ariadne::proto::load(path).map_err(|e| format!("cannot load '{}': {e}", path.display()))
 }
 
 pub fn has_errors(diags: &[Diagnostic]) -> bool {
@@ -54,17 +53,24 @@ mod tests {
     #[test]
     fn has_errors_true_when_any_error_present() {
         let diags = vec![
-            ariadne::diagnostics::Diagnostic::warning(ariadne::diagnostics::DiagCode::UnusedInput, "w"),
-            ariadne::diagnostics::Diagnostic::error(ariadne::diagnostics::DiagCode::CycleDetected, "e"),
+            ariadne::diagnostics::Diagnostic::warning(
+                ariadne::diagnostics::DiagCode::UnusedInput,
+                "w",
+            ),
+            ariadne::diagnostics::Diagnostic::error(
+                ariadne::diagnostics::DiagCode::CycleDetected,
+                "e",
+            ),
         ];
         assert!(has_errors(&diags));
     }
 
     #[test]
     fn has_errors_false_when_only_warnings() {
-        let diags = vec![
-            ariadne::diagnostics::Diagnostic::warning(ariadne::diagnostics::DiagCode::FallbackPlacementSelected, "w"),
-        ];
+        let diags = vec![ariadne::diagnostics::Diagnostic::warning(
+            ariadne::diagnostics::DiagCode::FallbackPlacementSelected,
+            "w",
+        )];
         assert!(!has_errors(&diags));
     }
 }

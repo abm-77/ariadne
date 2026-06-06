@@ -12,7 +12,9 @@ impl BackendRegistry {
     pub fn with_builtins() -> Self {
         use crate::backends::github::GithubActionsBackend;
         use crate::backends::local::LocalBackend;
-        let mut r = Self { backends: HashMap::new() };
+        let mut r = Self {
+            backends: HashMap::new(),
+        };
         r.insert(Box::new(GithubActionsBackend::default()));
         r.insert(Box::new(LocalBackend::podman()));
         r
@@ -36,7 +38,9 @@ impl BackendRegistry {
             if let Some(path) = find_in_path(&bin) {
                 let ext = crate::backends::external::ExternalBackend::load(id, path);
                 match ext {
-                    Ok(b) => { self.backends.insert(id.to_string(), Box::new(b)); }
+                    Ok(b) => {
+                        self.backends.insert(id.to_string(), Box::new(b));
+                    }
                     Err(e) => {
                         eprintln!("warning: found {bin} in PATH but failed to load: {e}");
                         return None;
@@ -70,11 +74,15 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 #[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    p.metadata().map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    p.metadata()
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 #[cfg(not(unix))]
-fn is_executable(_p: &Path) -> bool { true }
+fn is_executable(_p: &Path) -> bool {
+    true
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -102,17 +110,32 @@ mod tests {
     fn github_workflow_capabilities_include_approvals_and_matrices() {
         let mut r = BackendRegistry::with_builtins();
         let b = r.resolve("github").unwrap();
-        assert!(b.workflow_capabilities().contains(WorkflowCapabilities::APPROVALS));
-        assert!(b.workflow_capabilities().contains(WorkflowCapabilities::MATRICES));
-        assert!(b.workflow_capabilities().contains(WorkflowCapabilities::RUNNER_SELECTION));
+        assert!(
+            b.workflow_capabilities()
+                .contains(WorkflowCapabilities::APPROVALS)
+        );
+        assert!(
+            b.workflow_capabilities()
+                .contains(WorkflowCapabilities::MATRICES)
+        );
+        assert!(
+            b.workflow_capabilities()
+                .contains(WorkflowCapabilities::RUNNER_SELECTION)
+        );
     }
 
     #[test]
     fn local_workflow_capabilities_include_approvals() {
         let mut r = BackendRegistry::with_builtins();
         let b = r.resolve("local").unwrap();
-        assert!(b.workflow_capabilities().contains(WorkflowCapabilities::APPROVALS));
-        assert!(!b.workflow_capabilities().contains(WorkflowCapabilities::MATRICES));
+        assert!(
+            b.workflow_capabilities()
+                .contains(WorkflowCapabilities::APPROVALS)
+        );
+        assert!(
+            !b.workflow_capabilities()
+                .contains(WorkflowCapabilities::MATRICES)
+        );
     }
 
     #[test]

@@ -61,7 +61,10 @@ impl OciRuntime {
         if status.success() {
             Ok(())
         } else {
-            Err(RuntimeError(format!("{} pull '{}' failed", self.name, image)))
+            Err(RuntimeError(format!(
+                "{} pull '{}' failed",
+                self.name, image
+            )))
         }
     }
 
@@ -83,7 +86,8 @@ impl OciRuntime {
         }
         cmd.arg(&spec.image);
         cmd.args(&spec.command);
-        let out = cmd.output()
+        let out = cmd
+            .output()
             .map_err(|e| RuntimeError(format!("failed to invoke {}: {e}", self.name)))?;
         Ok(RunResult {
             exit_code: out.status.code().unwrap_or(-1),
@@ -97,36 +101,58 @@ pub struct PodmanRuntime(OciRuntime);
 
 impl PodmanRuntime {
     pub fn new(bin: PathBuf) -> Self {
-        Self(OciRuntime { name: "podman".into(), bin })
+        Self(OciRuntime {
+            name: "podman".into(),
+            bin,
+        })
     }
 }
 
 impl Default for PodmanRuntime {
-    fn default() -> Self { Self::new(PathBuf::from("podman")) }
+    fn default() -> Self {
+        Self::new(PathBuf::from("podman"))
+    }
 }
 
 impl ContainerRuntime for PodmanRuntime {
-    fn name(&self) -> &str { self.0.name.as_str() }
-    fn pull(&self, image: &str) -> Result<(), RuntimeError> { self.0.pull(image) }
-    fn run(&self, spec: &ContainerSpec) -> Result<RunResult, RuntimeError> { self.0.run(spec) }
+    fn name(&self) -> &str {
+        self.0.name.as_str()
+    }
+    fn pull(&self, image: &str) -> Result<(), RuntimeError> {
+        self.0.pull(image)
+    }
+    fn run(&self, spec: &ContainerSpec) -> Result<RunResult, RuntimeError> {
+        self.0.run(spec)
+    }
 }
 
 pub struct DockerRuntime(OciRuntime);
 
 impl DockerRuntime {
     pub fn new(bin: PathBuf) -> Self {
-        Self(OciRuntime { name: "docker".into(), bin })
+        Self(OciRuntime {
+            name: "docker".into(),
+            bin,
+        })
     }
 }
 
 impl Default for DockerRuntime {
-    fn default() -> Self { Self::new(PathBuf::from("docker")) }
+    fn default() -> Self {
+        Self::new(PathBuf::from("docker"))
+    }
 }
 
 impl ContainerRuntime for DockerRuntime {
-    fn name(&self) -> &str { self.0.name.as_str() }
-    fn pull(&self, image: &str) -> Result<(), RuntimeError> { self.0.pull(image) }
-    fn run(&self, spec: &ContainerSpec) -> Result<RunResult, RuntimeError> { self.0.run(spec) }
+    fn name(&self) -> &str {
+        self.0.name.as_str()
+    }
+    fn pull(&self, image: &str) -> Result<(), RuntimeError> {
+        self.0.pull(image)
+    }
+    fn run(&self, spec: &ContainerSpec) -> Result<RunResult, RuntimeError> {
+        self.0.run(spec)
+    }
 }
 
 #[cfg(test)]
@@ -142,5 +168,4 @@ mod tests {
     fn docker_runtime_name() {
         assert_eq!(DockerRuntime::default().name(), "docker");
     }
-
 }

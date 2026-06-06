@@ -74,6 +74,7 @@ def _profile_json(profile: "dict | str | None") -> "str | None":
     if profile is None or isinstance(profile, str):
         return profile
     import json
+
     return json.dumps(profile)
 
 
@@ -140,7 +141,9 @@ class Pipeline:
         """Optimize a plan for the given backend and optimization level (0-3).
         `profile` (dict or JSON str) feeds the cost model with runner costs,
         durations and artifact sizes."""
-        return self._inner.optimize(plan, backend=backend, level=level, profile=_profile_json(profile))
+        return self._inner.optimize(
+            plan, backend=backend, level=level, profile=_profile_json(profile)
+        )
 
     def emit(self, plan, backend: str = "local") -> str:
         """Emit backend-specific configuration from a plan."""
@@ -156,6 +159,7 @@ class Pipeline:
         workflow. Each case builds its assertions; returns a TestResults — assert
         `.passed`. A prebuilt Suite or Case may also be passed."""
         from .testing import Suite, Case, TestResults
+
         built: list[Case] = []
         for c in cases:
             if isinstance(c, Suite):
@@ -166,5 +170,7 @@ class Pipeline:
                 built.append(c())
             else:
                 raise TypeError(f"expected a @test_case, Case, or Suite, got {type(c)!r}")
-        rows = self._inner.run_tests(Suite(built).to_json(), backend=backend, level=level, profile=_profile_json(profile))
+        rows = self._inner.run_tests(
+            Suite(built).to_json(), backend=backend, level=level, profile=_profile_json(profile)
+        )
         return TestResults(rows)

@@ -67,11 +67,23 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn error(code: DiagCode, message: impl Into<String>) -> Self {
-        Self { code, severity: Severity::Error, message: message.into(), span: None, suggested_fix: None }
+        Self {
+            code,
+            severity: Severity::Error,
+            message: message.into(),
+            span: None,
+            suggested_fix: None,
+        }
     }
 
     pub fn warning(code: DiagCode, message: impl Into<String>) -> Self {
-        Self { code, severity: Severity::Warning, message: message.into(), span: None, suggested_fix: None }
+        Self {
+            code,
+            severity: Severity::Warning,
+            message: message.into(),
+            span: None,
+            suggested_fix: None,
+        }
     }
 
     pub fn with_fix(mut self, fix: impl Into<String>) -> Self {
@@ -79,7 +91,9 @@ impl Diagnostic {
         self
     }
 
-    pub fn is_error(&self) -> bool { self.severity == Severity::Error }
+    pub fn is_error(&self) -> bool {
+        self.severity == Severity::Error
+    }
 }
 
 impl std::fmt::Display for Diagnostic {
@@ -117,8 +131,7 @@ mod tests {
 
     #[test]
     fn with_fix_attaches_suggestion() {
-        let d = Diagnostic::error(DiagCode::MissingProducer, "missing")
-            .with_fix("add an action");
+        let d = Diagnostic::error(DiagCode::MissingProducer, "missing").with_fix("add an action");
         assert_eq!(d.suggested_fix.as_deref(), Some("add an action"));
     }
 

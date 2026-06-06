@@ -15,11 +15,17 @@ use crate::planner::{OptimizationDecision, Plan};
 pub struct ParallelizationPass;
 
 impl Pass for ParallelizationPass {
-    fn name(&self) -> &str { "parallelization" }
-    fn min_level(&self) -> OptLevel { OptLevel::O2 }
+    fn name(&self) -> &str {
+        "parallelization"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O2
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
-        let Some(n) = ctx.policy.max_parallel_jobs else { return Vec::new() };
+        let Some(n) = ctx.policy.max_parallel_jobs else {
+            return Vec::new();
+        };
         let natural = plan.max_concurrency();
         if n == 0 || natural <= n {
             return Vec::new(); // already within policy
@@ -49,8 +55,8 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, Workflow, WorkflowBuilder};
-    use crate::optimize::{optimize, OptLevel, OptimizeCtx};
+    use crate::ir::{ArtifactType, Workflow, WorkflowBuilder, default_objectives};
+    use crate::optimize::{OptLevel, OptimizeCtx, optimize};
     use crate::profile::Profile;
 
     fn run(wf: &Workflow, level: OptLevel) -> Plan {
@@ -86,15 +92,27 @@ mod tests {
     #[test]
     fn caps_concurrency_to_policy() {
         let plan = run(&fan_out(5, Some(2)), OptLevel::O2);
-        assert!(plan.max_concurrency() <= 2, "width {}", plan.max_concurrency());
-        assert!(plan.optimizations.iter().any(|d| d.pass == "parallelization"));
+        assert!(
+            plan.max_concurrency() <= 2,
+            "width {}",
+            plan.max_concurrency()
+        );
+        assert!(
+            plan.optimizations
+                .iter()
+                .any(|d| d.pass == "parallelization")
+        );
     }
 
     #[test]
     fn within_policy_adds_no_edges() {
         let plan = run(&fan_out(3, Some(5)), OptLevel::O2);
         assert!(plan.units.iter().all(|u| u.needs.is_empty()));
-        assert!(plan.optimizations.iter().all(|d| d.pass != "parallelization"));
+        assert!(
+            plan.optimizations
+                .iter()
+                .all(|d| d.pass != "parallelization")
+        );
     }
 
     #[test]

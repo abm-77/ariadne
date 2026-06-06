@@ -146,7 +146,9 @@ class TestResources:
         from ariadne import resources
 
         assert resources(cpu=8, memory="32Gi", disk="100Gi").to_tir() == {
-            "cpu": 8, "memory": "32Gi", "disk": "100Gi",
+            "cpu": 8,
+            "memory": "32Gi",
+            "disk": "100Gi",
         }
 
     def test_resources_on_action(self):
@@ -168,6 +170,8 @@ class TestResources:
     def test_actor_advertises_resources(self):
         from ariadne import Inventory, resources
 
-        inv = Inventory("ci").actor("big", selector=["large"], resources=resources(cpu=16, memory="64Gi"))
+        inv = Inventory("ci").actor(
+            "big", selector=["large"], resources=resources(cpu=16, memory="64Gi")
+        )
         tir = inv.to_tir()
         assert tir["actors"][0]["resources"] == {"cpu": 16, "memory": "64Gi"}

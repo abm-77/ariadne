@@ -2,14 +2,14 @@
 // the lint fires on macro-generated code we don't control.
 #![allow(clippy::useless_conversion)]
 
-use ariadne::{Pipeline as RsPipeline, ir::Workflow};
-use ariadne::backends::EmittingBackend;
+use ariadne::analysis::Analysis;
 use ariadne::backends::github::GithubActionsBackend;
 use ariadne::backends::local::LocalBackend;
+use ariadne::backends::EmittingBackend;
 use ariadne::optimize::{optimize, OptLevel, OptimizeCtx};
-use ariadne::analysis::Analysis;
 use ariadne::profile::Profile;
-use pyo3::exceptions::{PyValueError, PyRuntimeError};
+use ariadne::{ir::Workflow, Pipeline as RsPipeline};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 fn parse_workflow(json: &str) -> PyResult<Workflow> {
@@ -39,18 +39,34 @@ pub struct Plan {
 
 #[pymethods]
 impl Plan {
-    fn workflow_name(&self) -> &str { self.inner.workflow_name.as_str() }
-    fn unit_count(&self) -> usize { self.inner.units.len() }
-    fn max_concurrency(&self) -> usize { self.inner.max_concurrency() }
+    fn workflow_name(&self) -> &str {
+        self.inner.workflow_name.as_str()
+    }
+    fn unit_count(&self) -> usize {
+        self.inner.units.len()
+    }
+    fn max_concurrency(&self) -> usize {
+        self.inner.max_concurrency()
+    }
 
     fn diagnostics(&self) -> Vec<String> {
         diags_to_strings(&self.inner.diagnostics)
     }
 
     fn optimizations(&self) -> Vec<(String, String, String, String, String)> {
-        self.inner.optimizations.iter().map(|o| {
-            (o.pass.clone(), o.target.clone(), o.from.clone(), o.to.clone(), o.reason.clone())
-        }).collect()
+        self.inner
+            .optimizations
+            .iter()
+            .map(|o| {
+                (
+                    o.pass.clone(),
+                    o.target.clone(),
+                    o.from.clone(),
+                    o.to.clone(),
+                    o.reason.clone(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -97,12 +113,20 @@ impl Pipeline {
     /// `profile` is optional profile JSON (runner costs, durations, artifact
     /// sizes) that guides the cost model. Returns a new Plan with decisions.
     #[pyo3(signature = (plan, backend="local", level=2, profile=None))]
-    fn optimize(&self, plan: &Plan, backend: &str, level: u8, profile: Option<&str>) -> PyResult<Plan> {
+    fn optimize(
+        &self,
+        plan: &Plan,
+        backend: &str,
+        level: u8,
+        profile: Option<&str>,
+    ) -> PyResult<Plan> {
         if backend != "github" && backend != "local" {
-            return Err(PyValueError::new_err(format!("unknown backend '{backend}'; supported: github, local")));
+            return Err(PyValueError::new_err(format!(
+                "unknown backend '{backend}'; supported: github, local"
+            )));
         }
         let caps = ariadne::backends::derive_capability_profile_from_inventory(
-            self.workflow.inventory.as_ref()
+            self.workflow.inventory.as_ref(),
         );
         let prof = parse_profile(profile)?;
         let wf = &self.workflow;
@@ -116,7 +140,9 @@ impl Pipeline {
             objectives: wf.policies.objectives.clone(),
             level: OptLevel::from_u8(level),
         };
-        Ok(Plan { inner: optimize(plan.inner.clone(), &ctx) })
+        Ok(Plan {
+            inner: optimize(plan.inner.clone(), &ctx),
+        })
     }
 
     /// Emit backend-specific configuration (YAML for github, Bash for local).
@@ -137,11 +163,15 @@ impl Pipeline {
     #[pyo3(signature = (backend="local", level=2, profile=None))]
     fn compile(&self, backend: &str, level: u8, profile: Option<&str>) -> PyResult<String> {
         if self.has_errors() {
-            let errs = self.validate().into_iter()
+            let errs = self
+                .validate()
+                .into_iter()
                 .filter(|s| s.starts_with("error:"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            return Err(PyValueError::new_err(format!("workflow has errors:\n{errs}")));
+            return Err(PyValueError::new_err(format!(
+                "workflow has errors:\n{errs}"
+            )));
         }
         let plan = self.plan()?;
         let plan = self.optimize(&plan, backend, level, profile)?;
@@ -153,12 +183,16 @@ impl Pipeline {
     /// Returns (case, assertion, status, detail) rows where status is
     /// "pass" | "fail" | "skip" ("skip" = execution-level, run via `loom test`).
     #[pyo3(signature = (suite_json, backend="github", level=2, profile=None))]
-    fn run_tests(&self, suite_json: &str, backend: &str, level: u8, profile: Option<&str>)
-        -> PyResult<Vec<(String, String, String, String)>>
-    {
-        use ariadne::testing::{check_plan, TestSuite};
-        use ariadne::planner::plan_for;
+    fn run_tests(
+        &self,
+        suite_json: &str,
+        backend: &str,
+        level: u8,
+        profile: Option<&str>,
+    ) -> PyResult<Vec<(String, String, String, String)>> {
         use ariadne::backends::derive_capability_profile_from_inventory;
+        use ariadne::planner::plan_for;
+        use ariadne::testing::{check_plan, TestSuite};
 
         let suite: TestSuite = serde_json::from_str(suite_json)
             .map_err(|e| PyValueError::new_err(format!("invalid test suite JSON: {e}")))?;
@@ -189,7 +223,12 @@ impl Pipeline {
             };
             for r in &results {
                 let status = if r.passed { "pass" } else { "fail" };
-                out.push((case.name.clone(), format!("{:?}", r.assertion), status.into(), r.detail.clone()));
+                out.push((
+                    case.name.clone(),
+                    format!("{:?}", r.assertion),
+                    status.into(),
+                    r.detail.clone(),
+                ));
             }
             // Execution-level assertions can't be decided from the plan; surface
             // them as skipped so they are visible but don't fail the suite.

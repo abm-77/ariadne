@@ -52,7 +52,10 @@ impl DependencyRegistry {
                 manager: manager.map(str::to_string),
                 package: package.to_string(),
             },
-            None => PackageRef { manager: None, package: tool.to_string() },
+            None => PackageRef {
+                manager: None,
+                package: tool.to_string(),
+            },
         }
     }
 }
@@ -64,14 +67,38 @@ mod tests {
     #[test]
     fn known_tool_resolves_to_package_and_manager() {
         let r = DependencyRegistry::builtin();
-        assert_eq!(r.resolve("maturin"), PackageRef { manager: Some("pip".into()), package: "maturin".into() });
-        assert_eq!(r.resolve("cargo-llvm-cov"), PackageRef { manager: Some("cargo".into()), package: "cargo-llvm-cov".into() });
-        assert_eq!(r.resolve("git"), PackageRef { manager: None, package: "git".into() });
+        assert_eq!(
+            r.resolve("maturin"),
+            PackageRef {
+                manager: Some("pip".into()),
+                package: "maturin".into()
+            }
+        );
+        assert_eq!(
+            r.resolve("cargo-llvm-cov"),
+            PackageRef {
+                manager: Some("cargo".into()),
+                package: "cargo-llvm-cov".into()
+            }
+        );
+        assert_eq!(
+            r.resolve("git"),
+            PackageRef {
+                manager: None,
+                package: "git".into()
+            }
+        );
     }
 
     #[test]
     fn unknown_tool_is_a_system_package_of_the_same_name() {
         let r = DependencyRegistry::builtin();
-        assert_eq!(r.resolve("ripgrep"), PackageRef { manager: None, package: "ripgrep".into() });
+        assert_eq!(
+            r.resolve("ripgrep"),
+            PackageRef {
+                manager: None,
+                package: "ripgrep".into()
+            }
+        );
     }
 }

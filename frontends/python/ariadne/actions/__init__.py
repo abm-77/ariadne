@@ -14,5 +14,4 @@ from . import sign
 from . import package
 from . import forge
 
-__all__ = ["scm", "build", "test", "fmt", "docs", "coverage",
-           "scan", "sign", "package", "forge"]
+__all__ = ["scm", "build", "test", "fmt", "docs", "coverage", "scan", "sign", "package", "forge"]

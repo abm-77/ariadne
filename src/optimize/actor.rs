@@ -6,7 +6,7 @@
 
 use super::{OptLevel, OptimizeCtx, Pass};
 use crate::ir::{ActionCall, Actor, ActorConstraint, Workflow};
-use crate::planner::{actor_for, OptimizationDecision, Plan};
+use crate::planner::{OptimizationDecision, Plan, actor_for};
 
 /// At/above this utilization an actor is treated as contended.
 const SATURATED: f64 = 0.85;
@@ -16,36 +16,66 @@ const UNDER: f64 = 0.30;
 pub struct ActorPass;
 
 impl Pass for ActorPass {
-    fn name(&self) -> &str { "actor" }
-    fn min_level(&self) -> OptLevel { OptLevel::O1 }
+    fn name(&self) -> &str {
+        "actor"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O1
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         let mut decisions = Vec::new();
         for unit in &mut plan.units {
             let action = ctx.workflow.action_call(unit.action_id);
             // Pinned actor, or no resolvable actor → leave as planned.
-            let Some(candidates) = candidate_actors(action, ctx.workflow) else { continue };
-            let Some(current) = actor_for(action, ctx.workflow) else { continue };
+            let Some(candidates) = candidate_actors(action, ctx.workflow) else {
+                continue;
+            };
+            let Some(current) = actor_for(action, ctx.workflow) else {
+                continue;
+            };
             // Profile-driven only: no utilization data ⇒ no change.
-            let Some(cur_util) = ctx.profile.utilization(current.id.as_str()) else { continue };
+            let Some(cur_util) = ctx.profile.utilization(current.id.as_str()) else {
+                continue;
+            };
 
             let util = |a: &Actor| ctx.profile.utilization(a.id.as_str()).unwrap_or(0.0);
-            let cost = |a: &Actor| a.labels.first()
-                .and_then(|l| ctx.profile.runner_costs.get(l.as_str()).copied())
-                .unwrap_or(f64::INFINITY);
-            let viable = |a: &Actor| a.id != current.id
-                && caps_superset(a, current)
-                && util(a) < SATURATED;
+            let cost = |a: &Actor| {
+                a.labels
+                    .first()
+                    .and_then(|l| ctx.profile.runner_costs.get(l.as_str()).copied())
+                    .unwrap_or(f64::INFINITY)
+            };
+            let viable =
+                |a: &Actor| a.id != current.id && caps_superset(a, current) && util(a) < SATURATED;
 
             let (choice, reason) = if cur_util >= SATURATED {
-                let pick = candidates.iter().copied().filter(|&a| viable(a))
+                let pick = candidates
+                    .iter()
+                    .copied()
+                    .filter(|&a| viable(a))
                     .min_by(|&a, &b| util(a).total_cmp(&util(b)));
-                (pick, format!("actor '{}' saturated (util={cur_util:.2}); moved to reduce contention", current.id))
+                (
+                    pick,
+                    format!(
+                        "actor '{}' saturated (util={cur_util:.2}); moved to reduce contention",
+                        current.id
+                    ),
+                )
             } else if cur_util <= UNDER {
                 let cur_cost = cost(current);
-                let pick = candidates.iter().copied().filter(|&a| viable(a) && cost(a) < cur_cost)
+                let pick = candidates
+                    .iter()
+                    .copied()
+                    .filter(|&a| viable(a) && cost(a) < cur_cost)
                     .min_by(|&a, &b| cost(a).total_cmp(&cost(b)));
-                (pick, format!("actor '{}' under-utilized (util={cur_util:.2}); moved to a cheaper fit", current.id))
+                (
+                    pick,
+                    format!(
+                        "actor '{}' under-utilized (util={cur_util:.2}); moved to a cheaper fit",
+                        current.id
+                    ),
+                )
             } else {
                 (None, String::new())
             };
@@ -74,16 +104,27 @@ impl Pass for ActorPass {
 /// constraints, every actor carrying a required label qualifies; with none,
 /// any actor does.
 fn candidate_actors<'a>(action: &ActionCall, workflow: &'a Workflow) -> Option<Vec<&'a Actor>> {
-    if action.actor_constraints.iter().any(|c| matches!(c, ActorConstraint::Specific(_))) {
+    if action
+        .actor_constraints
+        .iter()
+        .any(|c| matches!(c, ActorConstraint::Specific(_)))
+    {
         return None;
     }
-    let labels: Vec<_> = action.actor_constraints.iter()
-        .filter_map(|c| match c { ActorConstraint::Label(l) => Some(*l), _ => None })
+    let labels: Vec<_> = action
+        .actor_constraints
+        .iter()
+        .filter_map(|c| match c {
+            ActorConstraint::Label(l) => Some(*l),
+            _ => None,
+        })
         .collect();
     let actors: Vec<&Actor> = if labels.is_empty() {
         workflow.actors().iter().collect()
     } else {
-        workflow.actors().iter()
+        workflow
+            .actors()
+            .iter()
             .filter(|a| labels.iter().all(|l| a.labels.contains(l)))
             .collect()
     };
@@ -93,7 +134,10 @@ fn candidate_actors<'a>(action: &ActionCall, workflow: &'a Workflow) -> Option<V
 /// `a` provides every capability `current` does (never drop a capability the
 /// unit may rely on, e.g. a mount upgraded by the placement pass).
 fn caps_superset(a: &Actor, current: &Actor) -> bool {
-    current.capabilities.iter().all(|c| a.capabilities.contains(c))
+    current
+        .capabilities
+        .iter()
+        .all(|c| a.capabilities.contains(c))
 }
 
 #[cfg(test)]
@@ -101,8 +145,8 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, WorkflowBuilder};
-    use crate::optimize::{optimize, OptLevel, OptimizeCtx};
+    use crate::ir::{ArtifactType, WorkflowBuilder, default_objectives};
+    use crate::optimize::{OptLevel, OptimizeCtx, optimize};
     use crate::profile::Profile;
 
     fn run(wf: &Workflow, profile: Profile) -> Plan {
@@ -146,7 +190,11 @@ mod tests {
         p.runner_costs.insert("small-label".into(), 0.2);
         let plan = run(&two_runner_wf(), p);
         let moved = plan.optimizations.iter().find(|d| d.pass == "actor");
-        assert!(moved.is_some(), "expected an actor move; got {:?}", plan.optimizations);
+        assert!(
+            moved.is_some(),
+            "expected an actor move; got {:?}",
+            plan.optimizations
+        );
         assert_eq!(moved.unwrap().to, "small");
     }
 
@@ -157,7 +205,11 @@ mod tests {
         p.actor_utilization.insert("small".into(), 0.2); // idle alternative
         let plan = run(&two_runner_wf(), p);
         let moved = plan.optimizations.iter().find(|d| d.pass == "actor");
-        assert!(moved.is_some(), "expected a contention move; got {:?}", plan.optimizations);
+        assert!(
+            moved.is_some(),
+            "expected a contention move; got {:?}",
+            plan.optimizations
+        );
         assert_eq!(moved.unwrap().to, "small");
         assert_eq!(plan.units[0].runner.as_str(), "small-label");
     }

@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use crate::ir::{
-    ArtifactId, ArtifactType, ConsequenceId, ConsequenceKind, Workflow,
-};
+use crate::ir::{ArtifactId, ArtifactType, ConsequenceId, ConsequenceKind, Workflow};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -46,7 +44,8 @@ struct ArtifactNode {
 fn build_artifact_trees(workflow: &Workflow) -> Vec<ArtifactNode> {
     let root_ids = find_root_artifact_ids(workflow);
     let mut visited = HashSet::new();
-    root_ids.iter()
+    root_ids
+        .iter()
         .map(|&id| build_subtree(workflow, id, &mut visited))
         .collect()
 }
@@ -54,7 +53,9 @@ fn build_artifact_trees(workflow: &Workflow) -> Vec<ArtifactNode> {
 fn find_root_artifact_ids(workflow: &Workflow) -> Vec<ArtifactId> {
     // "Source" actions: action calls with no artifact inputs.
     // The artifacts they produce are the roots of the data flow.
-    let source_outputs: Vec<ArtifactId> = workflow.action_calls.iter()
+    let source_outputs: Vec<ArtifactId> = workflow
+        .action_calls
+        .iter()
         .filter(|a| a.inputs.is_empty())
         .flat_map(|a| a.outputs.iter().copied())
         .collect();
@@ -64,7 +65,10 @@ fn find_root_artifact_ids(workflow: &Workflow) -> Vec<ArtifactId> {
     }
 
     // Fallback: externally supplied artifacts (no declared producer).
-    let external: Vec<ArtifactId> = workflow.artifacts.iter().enumerate()
+    let external: Vec<ArtifactId> = workflow
+        .artifacts
+        .iter()
+        .enumerate()
         .filter(|(_, a)| a.producer.is_none())
         .map(|(i, _)| ArtifactId(i as u32))
         .collect();
@@ -89,13 +93,16 @@ fn build_subtree(
     visited.insert(id);
     let artifact = workflow.artifact(id);
 
-    let child_ids: Vec<ArtifactId> = workflow.action_calls.iter()
+    let child_ids: Vec<ArtifactId> = workflow
+        .action_calls
+        .iter()
         .filter(|a| a.inputs.contains(&id))
         .flat_map(|a| a.outputs.iter().copied())
         .filter(|out_id| !visited.contains(out_id))
         .collect();
 
-    let children: Vec<ArtifactNode> = child_ids.into_iter()
+    let children: Vec<ArtifactNode> = child_ids
+        .into_iter()
         .map(|out_id| build_subtree(workflow, out_id, visited))
         .collect();
 
@@ -108,7 +115,10 @@ fn build_subtree(
 
 fn render_tree(node: &ArtifactNode, prefix: &str, is_last: bool, out: &mut String) {
     let connector = if is_last { "└─ " } else { "├─ " };
-    out.push_str(&format!("{prefix}{connector}{} *({})*\n", node.name, node.ty));
+    out.push_str(&format!(
+        "{prefix}{connector}{} *({})*\n",
+        node.name, node.ty
+    ));
     let child_prefix = format!("{prefix}{}", if is_last { "   " } else { "│  " });
     for (i, child) in node.children.iter().enumerate() {
         render_tree(child, &child_prefix, i == node.children.len() - 1, out);
@@ -162,7 +172,9 @@ fn write_summary(out: &mut String, workflow: &Workflow) {
 }
 
 fn write_artifact_graph(out: &mut String, workflow: &Workflow) {
-    if workflow.artifacts.is_empty() { return; }
+    if workflow.artifacts.is_empty() {
+        return;
+    }
     out.push_str("## Artifact Graph\n\n");
     out.push_str("```\n");
     let trees = build_artifact_trees(workflow);
@@ -171,53 +183,82 @@ fn write_artifact_graph(out: &mut String, workflow: &Workflow) {
         for (j, child) in root.children.iter().enumerate() {
             render_tree(child, "", j == root.children.len() - 1, out);
         }
-        if i < trees.len() - 1 { out.push('\n'); }
+        if i < trees.len() - 1 {
+            out.push('\n');
+        }
     }
     out.push_str("```\n\n");
 }
 
 fn write_actions(out: &mut String, workflow: &Workflow) {
-    if workflow.action_calls.is_empty() { return; }
+    if workflow.action_calls.is_empty() {
+        return;
+    }
     out.push_str("## Actions\n\n");
     out.push_str("| Action | Inputs | Outputs | Consequences |\n");
     out.push_str("|--------|--------|---------|---------------|\n");
     for call in &workflow.action_calls {
-        let inputs: Vec<&str> = call.inputs.iter()
+        let inputs: Vec<&str> = call
+            .inputs
+            .iter()
             .map(|&id| workflow.artifact(id).name.as_str())
             .collect();
-        let outputs: Vec<&str> = call.outputs.iter()
+        let outputs: Vec<&str> = call
+            .outputs
+            .iter()
             .map(|&id| workflow.artifact(id).name.as_str())
             .collect();
-        let csqs: Vec<&str> = call.consequences.iter()
+        let csqs: Vec<&str> = call
+            .consequences
+            .iter()
             .map(|&id| workflow.consequence(id).name.as_str())
             .collect();
 
         out.push_str(&format!(
             "| `{}` | {} | {} | {} |\n",
             call.name,
-            if inputs.is_empty() { "—".into() } else { inputs.join(", ") },
-            if outputs.is_empty() { "—".into() } else { outputs.join(", ") },
-            if csqs.is_empty() { "—".into() } else { csqs.join(", ") },
+            if inputs.is_empty() {
+                "—".into()
+            } else {
+                inputs.join(", ")
+            },
+            if outputs.is_empty() {
+                "—".into()
+            } else {
+                outputs.join(", ")
+            },
+            if csqs.is_empty() {
+                "—".into()
+            } else {
+                csqs.join(", ")
+            },
         ));
     }
     out.push('\n');
 }
 
 fn write_artifacts(out: &mut String, workflow: &Workflow) {
-    if workflow.artifacts.is_empty() { return; }
+    if workflow.artifacts.is_empty() {
+        return;
+    }
     out.push_str("## Artifacts\n\n");
     out.push_str("| Artifact | Type | Producer | Consumers |\n");
     out.push_str("|----------|------|----------|-----------|\n");
     for (i, artifact) in workflow.artifacts.iter().enumerate() {
         let id = ArtifactId(i as u32);
-        let producer = artifact.producer
+        let producer = artifact
+            .producer
             .map(|pid| format!("`{}`", workflow.action_call(pid).name.as_str()))
             .unwrap_or_else(|| "*(external)*".into());
-        let consumers: Vec<String> = workflow.action_calls.iter()
+        let consumers: Vec<String> = workflow
+            .action_calls
+            .iter()
             .filter(|a| a.inputs.contains(&id))
             .map(|a| format!("`{}`", a.name))
             .collect();
-        let path_note = artifact.path.as_deref()
+        let path_note = artifact
+            .path
+            .as_deref()
             .map(|p| format!(" `{p}`"))
             .unwrap_or_default();
         out.push_str(&format!(
@@ -226,24 +267,32 @@ fn write_artifacts(out: &mut String, workflow: &Workflow) {
             path_note,
             format_artifact_type(&artifact.ty),
             producer,
-            if consumers.is_empty() { "*(none)*".into() } else { consumers.join(", ") },
+            if consumers.is_empty() {
+                "*(none)*".into()
+            } else {
+                consumers.join(", ")
+            },
         ));
     }
     out.push('\n');
 }
 
 fn write_consequences(out: &mut String, workflow: &Workflow) {
-    if workflow.consequences.is_empty() { return; }
+    if workflow.consequences.is_empty() {
+        return;
+    }
     out.push_str("## Consequences\n\n");
     out.push_str(
         "> Consequences are external mutations or privileged interactions. \
-         They are never silently executed and are visible in the plan.\n\n"
+         They are never silently executed and are visible in the plan.\n\n",
     );
     out.push_str("| Consequence | Kind | Triggered By | Approval Required |\n");
     out.push_str("|-------------|------|--------------|-------------------|\n");
     for (i, csq) in workflow.consequences.iter().enumerate() {
         let cid = ConsequenceId(i as u32);
-        let triggered_by: Vec<String> = workflow.action_calls.iter()
+        let triggered_by: Vec<String> = workflow
+            .action_calls
+            .iter()
             .filter(|a| a.consequences.contains(&cid))
             .map(|a| format!("`{}`", a.name))
             .collect();
@@ -251,7 +300,11 @@ fn write_consequences(out: &mut String, workflow: &Workflow) {
             "| `{}` | {} | {} | {} |\n",
             csq.name,
             format_consequence_kind(&csq.kind),
-            if triggered_by.is_empty() { "*(none)*".into() } else { triggered_by.join(", ") },
+            if triggered_by.is_empty() {
+                "*(none)*".into()
+            } else {
+                triggered_by.join(", ")
+            },
             if csq.requires_approval { "Yes" } else { "No" },
         ));
     }
@@ -260,7 +313,9 @@ fn write_consequences(out: &mut String, workflow: &Workflow) {
 
 fn write_secrets(out: &mut String, workflow: &Workflow) {
     let secrets: Vec<(&str, Vec<&str>)> = collect_secrets(workflow);
-    if secrets.is_empty() { return; }
+    if secrets.is_empty() {
+        return;
+    }
     out.push_str("## Secrets\n\n");
     out.push_str("| Secret | Used By |\n");
     out.push_str("|--------|---------|\n");
@@ -268,25 +323,36 @@ fn write_secrets(out: &mut String, workflow: &Workflow) {
         out.push_str(&format!(
             "| `{}` | {} |\n",
             secret,
-            actions.iter().map(|a| format!("`{a}`")).collect::<Vec<_>>().join(", ")
+            actions
+                .iter()
+                .map(|a| format!("`{a}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     out.push('\n');
 }
 
 fn write_release_gates(out: &mut String, workflow: &Workflow) {
-    let gated: Vec<_> = workflow.consequences.iter().enumerate()
+    let gated: Vec<_> = workflow
+        .consequences
+        .iter()
+        .enumerate()
         .filter(|(_, c)| c.requires_approval)
         .collect();
-    if gated.is_empty() { return; }
+    if gated.is_empty() {
+        return;
+    }
 
     out.push_str("## Release Gates\n\n");
     out.push_str(
-        "The following consequences require explicit approval before they can proceed:\n\n"
+        "The following consequences require explicit approval before they can proceed:\n\n",
     );
     for (i, csq) in &gated {
         let cid = ConsequenceId(*i as u32);
-        let triggered_by: Vec<&str> = workflow.action_calls.iter()
+        let triggered_by: Vec<&str> = workflow
+            .action_calls
+            .iter()
             .filter(|a| a.consequences.contains(&cid))
             .map(|a| a.name.as_str())
             .collect();
@@ -297,7 +363,11 @@ fn write_release_gates(out: &mut String, workflow: &Workflow) {
             if triggered_by.is_empty() {
                 "*(none)*".into()
             } else {
-                triggered_by.iter().map(|a| format!("`{a}`")).collect::<Vec<_>>().join(", ")
+                triggered_by
+                    .iter()
+                    .map(|a| format!("`{a}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             }
         ));
     }
@@ -315,18 +385,25 @@ fn write_inventory(out: &mut String, workflow: &Workflow) {
     if !inv.actors.is_empty() {
         out.push_str("**Actors:**\n\n");
         for actor in &inv.actors {
-            let caps = actor.capabilities.iter()
+            let caps = actor
+                .capabilities
+                .iter()
                 .map(|c| format!("`{c}`"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let labels = actor.labels.iter()
+            let labels = actor
+                .labels
+                .iter()
                 .map(|l| format!("`{l}`"))
                 .collect::<Vec<_>>()
                 .join(", ");
             if caps.is_empty() {
                 out.push_str(&format!("- `{}` (labels: {})\n", actor.id, labels));
             } else {
-                out.push_str(&format!("- `{}` (labels: {}; capabilities: {})\n", actor.id, labels, caps));
+                out.push_str(&format!(
+                    "- `{}` (labels: {}; capabilities: {})\n",
+                    actor.id, labels, caps
+                ));
             }
         }
         out.push('\n');
@@ -335,12 +412,16 @@ fn write_inventory(out: &mut String, workflow: &Workflow) {
     if !inv.placements.is_empty() {
         out.push_str("**Placement providers:**\n\n");
         for p in &inv.placements {
-            let modes = p.access_modes.iter()
+            let modes = p
+                .access_modes
+                .iter()
                 .map(|m| format!("`{m}`"))
                 .collect::<Vec<_>>()
                 .join(", ");
             out.push_str(&format!("- `{}` (kind: `{}`", p.id, p.kind));
-            if !modes.is_empty() { out.push_str(&format!("; access: {modes}")); }
+            if !modes.is_empty() {
+                out.push_str(&format!("; access: {modes}"));
+            }
             out.push_str(")\n");
         }
         out.push('\n');
@@ -350,9 +431,15 @@ fn write_inventory(out: &mut String, workflow: &Workflow) {
         out.push_str("**Implementations:**\n\n");
         for i in &inv.implementations {
             let mut parts: Vec<String> = vec![];
-            if let Some(v) = &i.version { parts.push(format!("version: `{v}`")); }
-            if i.prefer { parts.push("preferred".to_string()); }
-            if i.deny { parts.push("denied".to_string()); }
+            if let Some(v) = &i.version {
+                parts.push(format!("version: `{v}`"));
+            }
+            if i.prefer {
+                parts.push("preferred".to_string());
+            }
+            if i.deny {
+                parts.push("denied".to_string());
+            }
             if parts.is_empty() {
                 out.push_str(&format!("- `{}`\n", i.id));
             } else {
@@ -370,14 +457,30 @@ fn write_backend_summary(out: &mut String, backend: &dyn crate::backends::Emitti
 
     let wc = backend.workflow_capabilities();
     let mut workflow_features: Vec<&str> = vec![];
-    if wc.contains(WC::JOBS) { workflow_features.push("jobs"); }
-    if wc.contains(WC::DEPENDENCIES) { workflow_features.push("dependencies"); }
-    if wc.contains(WC::CONDITIONS) { workflow_features.push("conditions"); }
-    if wc.contains(WC::MATRICES) { workflow_features.push("matrices"); }
-    if wc.contains(WC::PERMISSIONS) { workflow_features.push("permissions"); }
-    if wc.contains(WC::SECRETS) { workflow_features.push("secrets"); }
-    if wc.contains(WC::APPROVALS) { workflow_features.push("approvals"); }
-    if wc.contains(WC::RUNNER_SELECTION) { workflow_features.push("runner selection"); }
+    if wc.contains(WC::JOBS) {
+        workflow_features.push("jobs");
+    }
+    if wc.contains(WC::DEPENDENCIES) {
+        workflow_features.push("dependencies");
+    }
+    if wc.contains(WC::CONDITIONS) {
+        workflow_features.push("conditions");
+    }
+    if wc.contains(WC::MATRICES) {
+        workflow_features.push("matrices");
+    }
+    if wc.contains(WC::PERMISSIONS) {
+        workflow_features.push("permissions");
+    }
+    if wc.contains(WC::SECRETS) {
+        workflow_features.push("secrets");
+    }
+    if wc.contains(WC::APPROVALS) {
+        workflow_features.push("approvals");
+    }
+    if wc.contains(WC::RUNNER_SELECTION) {
+        workflow_features.push("runner selection");
+    }
     if !workflow_features.is_empty() {
         out.push_str(&format!(
             "**Workflow features:** {}\n\n",
@@ -421,7 +524,8 @@ fn format_consequence_kind(kind: &ConsequenceKind) -> &'static str {
 }
 
 fn humanize_name(name: &str) -> String {
-    let words: Vec<String> = name.split(['_', '-'])
+    let words: Vec<String> = name
+        .split(['_', '-'])
         .map(|w| {
             let mut c = w.chars();
             match c.next() {
@@ -435,19 +539,27 @@ fn humanize_name(name: &str) -> String {
 
 fn derive_verbs(workflow: &Workflow) -> String {
     let mut verbs: Vec<&str> = vec![];
-    let has_test = workflow.action_calls.iter()
+    let has_test = workflow
+        .action_calls
+        .iter()
         .any(|a| a.name.as_str().contains("test"));
-    let has_build = workflow.action_calls.iter()
+    let has_build = workflow
+        .action_calls
+        .iter()
         .any(|a| a.name.as_str().contains("build") || a.name.as_str().contains("compile"));
 
-    if has_build { verbs.push("builds artifacts"); }
-    if has_test { verbs.push("runs tests"); }
+    if has_build {
+        verbs.push("builds artifacts");
+    }
+    if has_test {
+        verbs.push("runs tests");
+    }
 
     for csq in &workflow.consequences {
         match csq.kind {
             ConsequenceKind::PublishRelease => verbs.push("publishes releases"),
             ConsequenceKind::Deployment => verbs.push("deploys"),
-            ConsequenceKind::SecretAccess => {},
+            ConsequenceKind::SecretAccess => {}
             ConsequenceKind::GitWrite => verbs.push("writes to the repository"),
             ConsequenceKind::CommentOnPr => verbs.push("comments on pull requests"),
             _ => {}
@@ -472,7 +584,9 @@ fn derive_verbs(workflow: &Workflow) -> String {
 
 fn unique_consequence_kinds(workflow: &Workflow) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
-    workflow.consequences.iter()
+    workflow
+        .consequences
+        .iter()
         .map(|c| format_consequence_kind(&c.kind).to_string())
         .filter(|k| seen.insert(k.clone()))
         .collect()
@@ -482,12 +596,13 @@ fn collect_secrets(workflow: &Workflow) -> Vec<(&str, Vec<&str>)> {
     let mut map: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
     for call in &workflow.action_calls {
         for secret in &call.secrets {
-            map.entry(secret.as_str()).or_default().push(call.name.as_str());
+            map.entry(secret.as_str())
+                .or_default()
+                .push(call.name.as_str());
         }
     }
     map.into_iter().collect()
 }
-
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -518,14 +633,17 @@ mod tests {
         b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         b.shell_action("build", "build", &[src], &[bin], "cargo build --release");
         let test_action = b.shell_action("test", "test", &[bin], &[report], "cargo test");
-        let deploy_action = b.shell_action("deploy", "deploy", &[report], &[], "kubectl apply -f .");
+        let deploy_action =
+            b.shell_action("deploy", "deploy", &[report], &[], "kubectl apply -f .");
         let publish_csq = b.consequence("publish", ConsequenceKind::PublishRelease, true);
         let deploy_csq = b.consequence("deploy", ConsequenceKind::Deployment, false);
         b.add_consequence_to(deploy_action, publish_csq);
         b.add_consequence_to(deploy_action, deploy_csq);
 
         let mut wf = b.build();
-        wf.action_calls[test_action.idx()].secrets.push("SIGNING_KEY".into());
+        wf.action_calls[test_action.idx()]
+            .secrets
+            .push("SIGNING_KEY".into());
         wf
     }
 
@@ -711,12 +829,16 @@ mod tests {
 
     #[test]
     fn inventory_section_shows_placement_providers() {
-        
         let mut b = WorkflowBuilder::new("ci");
         let src = b.artifact("src", ArtifactType::SourceTree);
         b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         b.actor("runner", &["ubuntu-latest"], &[]);
-        b.inventory_placement("workspace", "volume", &["mount_rw", "same_host"], &["runner"]);
+        b.inventory_placement(
+            "workspace",
+            "volume",
+            &["mount_rw", "same_host"],
+            &["runner"],
+        );
         let wf = b.build();
         let doc = generate(&wf);
         assert!(doc.contains("workspace"));

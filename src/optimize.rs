@@ -98,7 +98,13 @@ mod tests {
     use super::*;
     use crate::ir::{ArtifactType, WorkflowBuilder};
 
-    fn ctx<'a>(wf: &'a crate::ir::Workflow, profile: &'a Profile, analysis: &'a Analysis, policy: &'a Policies, level: OptLevel) -> OptimizeCtx<'a> {
+    fn ctx<'a>(
+        wf: &'a crate::ir::Workflow,
+        profile: &'a Profile,
+        analysis: &'a Analysis,
+        policy: &'a Policies,
+        level: OptLevel,
+    ) -> OptimizeCtx<'a> {
         OptimizeCtx {
             workflow: wf,
             profile,

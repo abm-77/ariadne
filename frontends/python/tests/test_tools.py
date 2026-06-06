@@ -44,6 +44,7 @@ class TestOutputDecl:
 
     def test_ref_creates_output_decl(self):
         from ariadne import ContainerImage
+
         decl = ContainerImage.ref("registry.io/app:{version}")
         assert isinstance(decl, OutputDecl)
         assert decl.path_hint() == "registry.io/app:{version}"
@@ -67,10 +68,12 @@ class TestContainerEscapeHatch:
         assert impl.run == "pip install ."
 
     def test_exec_with_string_list_joins(self):
-        impl = container("alpine").exec([
-            "mkdir -p dist",
-            "echo hello > dist/out.txt",
-        ])
+        impl = container("alpine").exec(
+            [
+                "mkdir -p dist",
+                "echo hello > dist/out.txt",
+            ]
+        )
         assert "mkdir -p dist" in impl.run
         assert "echo hello > dist/out.txt" in impl.run
 
@@ -151,6 +154,7 @@ class TestSemanticActions:
 
     def test_artifact_handle_arg_becomes_name(self):
         from ariadne._handle import ArtifactHandle
+
         h = ArtifactHandle(0, "checkout/src")
         impl = scan.sbom(image=h)
         assert impl.to_tir()["args"]["image"] == "checkout/src"
@@ -185,6 +189,7 @@ class TestImplBinding:
 
     def test_block_prefers_for_multiple_calls(self):
         from ariadne import impl
+
         with impl("cargo"):
             a = build.binary(package="x")
             b = test_ns.unit(args=["--workspace"])
@@ -195,6 +200,7 @@ class TestImplBinding:
 
     def test_impls_block_binds_several_at_once(self):
         from ariadne import impls
+
         with impls(["maturin", "ruff", "pytest"]):
             w = build.python_wheel(package="ariadne")
             t = test_ns.unit(paths=["tests/"])
@@ -205,6 +211,7 @@ class TestImplBinding:
 
     def test_explicit_using_overrides_block(self):
         from ariadne import impl
+
         with impl("cargo"):
             t = test_ns.unit(using="pytest", paths=["tests/"])
         # The hard pin stands; the soft preference rides along.
@@ -213,6 +220,7 @@ class TestImplBinding:
 
     def test_nested_blocks_restore(self):
         from ariadne import impl, impls
+
         with impls(["cargo", "ruff"]):
             outer = test_ns.unit()
             with impl("pytest"):
@@ -225,6 +233,7 @@ class TestImplBinding:
 
     def test_binding_clears_after_block(self):
         from ariadne import impl
+
         with impl("cargo"):
             pass
         assert "prefer" not in test_ns.unit().to_tir()

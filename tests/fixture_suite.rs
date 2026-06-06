@@ -1,5 +1,5 @@
 use ariadne::backends::local::LocalBackend;
-use ariadne::testing::{check_plan, optimize_for, run_fixture, Fixture};
+use ariadne::testing::{Fixture, check_plan, optimize_for, run_fixture};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -47,7 +47,7 @@ fn loom_test_fixtures() {
             let baseline = ariadne::planner::plan_for(&fixture.workflow, &fixture.event)
                 .unwrap_or_else(|e| panic!("plan fixture {name}: {e:?}"));
             let caps = ariadne::backends::derive_capability_profile_from_inventory(
-                fixture.workflow.inventory.as_ref()
+                fixture.workflow.inventory.as_ref(),
             );
             let plan = optimize_for(&fixture.workflow, baseline, caps);
             check_plan(&plan, &backend, &fixture.assertions)
@@ -60,6 +60,10 @@ fn loom_test_fixtures() {
     }
 
     assert!(ran > 0, "no fixtures discovered in {}", dir.display());
-    assert!(failures.is_empty(), "fixture assertion failures:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "fixture assertion failures:\n{}",
+        failures.join("\n")
+    );
     eprintln!("loom-test fixtures: {ran} checked (podman={podman})");
 }

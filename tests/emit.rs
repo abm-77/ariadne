@@ -1,5 +1,5 @@
-use ariadne::backends::github::{emit, EmitOptions, GithubActionsBackend};
 use ariadne::backends::Backend;
+use ariadne::backends::github::{EmitOptions, GithubActionsBackend, emit};
 use ariadne::ir::Workflow;
 
 fn fixture() -> Workflow {
@@ -26,9 +26,22 @@ fn build_self_checks_out() {
     // repo itself via a checkout step rather than depending on a checkout job.
     let plan = ariadne::planner::plan(&fixture()).unwrap();
     assert!(plan.units.iter().all(|u| u.action_name != "checkout"));
-    let build = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-    assert!(!build.needs.iter().any(|n| n == "checkout"), "{:?}", build.needs);
-    assert!(build.ops.iter().any(|op| matches!(op, ariadne::planner::LogicalOp::CheckoutRepo)));
+    let build = plan
+        .units
+        .iter()
+        .find(|u| u.action_name == "build")
+        .unwrap();
+    assert!(
+        !build.needs.iter().any(|n| n == "checkout"),
+        "{:?}",
+        build.needs
+    );
+    assert!(
+        build
+            .ops
+            .iter()
+            .any(|op| matches!(op, ariadne::planner::LogicalOp::CheckoutRepo))
+    );
 }
 
 #[test]
@@ -54,10 +67,17 @@ fn copy_fallback_emits_without_warnings() {
     // correct and carries no "fallback" warning — that warning is reserved for
     // the optimizer downgrading a declared mount it couldn't realize.
     let wf = fixture();
-    assert!(wf.actors().iter().all(|a| !a.capabilities.iter().any(|c| c == "mount")));
+    assert!(
+        wf.actors()
+            .iter()
+            .all(|a| !a.capabilities.iter().any(|c| c == "mount"))
+    );
     let plan = ariadne::planner::plan(&wf).unwrap();
-    assert!(plan.diagnostics.iter()
-        .all(|d| d.code != ariadne::diagnostics::DiagCode::FallbackPlacementSelected));
+    assert!(
+        plan.diagnostics
+            .iter()
+            .all(|d| d.code != ariadne::diagnostics::DiagCode::FallbackPlacementSelected)
+    );
     let yaml = emit(&plan, &EmitOptions::default());
     assert!(yaml.contains("upload-artifact") && yaml.contains("download-artifact"));
 }

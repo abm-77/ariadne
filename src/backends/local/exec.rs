@@ -2,13 +2,13 @@
 //! Lowering and rendering go through the backend's `lower`; this module only
 //! orchestrates containers, secret spoofing, and the mock artifact store.
 
-use crate::backends::local::runtime::{ContainerRuntime, ContainerSpec, Mount};
-use crate::backends::local::LocalBackend;
 use crate::backends::Backend;
+use crate::backends::local::LocalBackend;
+use crate::backends::local::runtime::{ContainerRuntime, ContainerSpec, Mount};
 use crate::planner::{ExecutionUnit, Plan};
 use crate::testing::{
-    produced_artifacts, spoof_value, transfers_of, ArtifactTransfer, Executor, TestRun,
-    UnitOutcome, UnitStatus,
+    ArtifactTransfer, Executor, TestRun, UnitOutcome, UnitStatus, produced_artifacts, spoof_value,
+    transfers_of,
 };
 
 impl<R: ContainerRuntime> Executor for LocalBackend<R> {
@@ -18,13 +18,18 @@ impl<R: ContainerRuntime> Executor for LocalBackend<R> {
     /// Shell lines come from the backend's `lower` (a `BashScript`), so there is
     /// no bespoke lowering here.
     fn execute(&self, plan: &Plan) -> Result<TestRun, String> {
-        self.runtime.pull(&self.opts.default_image).map_err(|e| e.to_string())?;
+        self.runtime
+            .pull(&self.opts.default_image)
+            .map_err(|e| e.to_string())?;
 
         let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos()).unwrap_or(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         let store = std::env::temp_dir().join(format!("loom-store-{}-{nanos}", std::process::id()));
-        std::fs::create_dir_all(&store).map_err(|e| format!("cannot create artifact store: {e}"))?;
+        std::fs::create_dir_all(&store)
+            .map_err(|e| format!("cannot create artifact store: {e}"))?;
         let store_host = store.to_string_lossy().into_owned();
 
         let script = self.lower(plan);
@@ -57,8 +62,16 @@ impl<R: ContainerRuntime> Executor for LocalBackend<R> {
                     command: vec!["bash".into(), "-c".into(), script_text],
                     env,
                     mounts: vec![
-                        Mount { host: cwd.to_string_lossy().into_owned(), container: self.opts.workdir.clone(), read_only: false },
-                        Mount { host: store_host.clone(), container: "/loom-artifacts".into(), read_only: false },
+                        Mount {
+                            host: cwd.to_string_lossy().into_owned(),
+                            container: self.opts.workdir.clone(),
+                            read_only: false,
+                        },
+                        Mount {
+                            host: store_host.clone(),
+                            container: "/loom-artifacts".into(),
+                            read_only: false,
+                        },
                     ],
                     workdir: Some(self.opts.workdir.clone()),
                     remove_after: true,
@@ -89,16 +102,31 @@ impl<R: ContainerRuntime> Executor for LocalBackend<R> {
             });
         }
 
-        Ok(TestRun { workflow_name: plan.workflow_name.to_string(), units: outcomes })
+        Ok(TestRun {
+            workflow_name: plan.workflow_name.to_string(),
+            units: outcomes,
+        })
     }
 }
 
 fn resolve_secrets(unit: &ExecutionUnit) -> (Vec<String>, Vec<String>, Vec<(String, String)>) {
     if unit.secrets_available {
-        let env = unit.secrets.iter().map(|n| (n.to_string(), spoof_value(n))).collect();
-        (unit.secrets.iter().map(|n| n.to_string()).collect(), Vec::new(), env)
+        let env = unit
+            .secrets
+            .iter()
+            .map(|n| (n.to_string(), spoof_value(n)))
+            .collect();
+        (
+            unit.secrets.iter().map(|n| n.to_string()).collect(),
+            Vec::new(),
+            env,
+        )
     } else {
-        (Vec::new(), unit.secrets.iter().map(|n| n.to_string()).collect(), Vec::new())
+        (
+            Vec::new(),
+            unit.secrets.iter().map(|n| n.to_string()).collect(),
+            Vec::new(),
+        )
     }
 }
 
@@ -129,7 +157,7 @@ mod tests {
     use super::*;
     use crate::backends::local::runtime::{RunResult, RuntimeError};
     use crate::ir::{ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
-    use crate::planner::{plan, plan_for, EventContext};
+    use crate::planner::{EventContext, plan, plan_for};
     use crate::testing::TransferKind;
     use std::sync::Mutex;
 
@@ -139,20 +167,45 @@ mod tests {
     }
     impl MockRuntime {
         fn with_exit_codes(codes: Vec<i32>) -> Self {
-            Self { specs: Mutex::new(Vec::new()), exit_codes: Mutex::new(codes) }
+            Self {
+                specs: Mutex::new(Vec::new()),
+                exit_codes: Mutex::new(codes),
+            }
         }
     }
     impl ContainerRuntime for MockRuntime {
-        fn name(&self) -> &str { "mock" }
-        fn pull(&self, _: &str) -> Result<(), RuntimeError> { Ok(()) }
+        fn name(&self) -> &str {
+            "mock"
+        }
+        fn pull(&self, _: &str) -> Result<(), RuntimeError> {
+            Ok(())
+        }
         fn run(&self, spec: &ContainerSpec) -> Result<RunResult, RuntimeError> {
-            let code = { let mut c = self.exit_codes.lock().unwrap(); if c.is_empty() { 0 } else { c.remove(0) } };
+            let code = {
+                let mut c = self.exit_codes.lock().unwrap();
+                if c.is_empty() { 0 } else { c.remove(0) }
+            };
             self.specs.lock().unwrap().push(ContainerSpec {
-                image: spec.image.clone(), command: spec.command.clone(), env: spec.env.clone(),
-                mounts: spec.mounts.iter().map(|m| Mount { host: m.host.clone(), container: m.container.clone(), read_only: m.read_only }).collect(),
-                workdir: spec.workdir.clone(), remove_after: spec.remove_after,
+                image: spec.image.clone(),
+                command: spec.command.clone(),
+                env: spec.env.clone(),
+                mounts: spec
+                    .mounts
+                    .iter()
+                    .map(|m| Mount {
+                        host: m.host.clone(),
+                        container: m.container.clone(),
+                        read_only: m.read_only,
+                    })
+                    .collect(),
+                workdir: spec.workdir.clone(),
+                remove_after: spec.remove_after,
             });
-            Ok(RunResult { exit_code: code, stdout: b"ok".to_vec(), stderr: Vec::new() })
+            Ok(RunResult {
+                exit_code: code,
+                stdout: b"ok".to_vec(),
+                stderr: Vec::new(),
+            })
         }
     }
 
@@ -175,21 +228,27 @@ mod tests {
 
     #[test]
     fn all_units_pass_when_exit_zero() {
-        let run = backend(vec![0, 0]).execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        let run = backend(vec![0, 0])
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         assert!(run.unit("checkout").unwrap().passed());
         assert!(run.unit("build").unwrap().passed());
     }
 
     #[test]
     fn produced_artifacts_recorded() {
-        let run = backend(vec![0, 0]).execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        let run = backend(vec![0, 0])
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         assert!(run.artifact_produced("binary"));
     }
 
     #[test]
     fn defaults_to_ubuntu_and_workspace() {
         let backend = backend(vec![0, 0]);
-        backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        backend
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         let specs = backend.runtime.specs.lock().unwrap();
         let s = specs.first().unwrap();
         assert_eq!(s.image, "ubuntu:24.04");
@@ -201,7 +260,9 @@ mod tests {
         let backend = LocalBackend::new(MockRuntime::with_exit_codes(vec![0, 0]))
             .with_image("rust:1")
             .with_workdir("/build");
-        let run = backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        let run = backend
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         assert!(run.unit("checkout").unwrap().passed());
         let specs = backend.runtime.specs.lock().unwrap();
         assert!(!specs.is_empty());
@@ -216,36 +277,58 @@ mod tests {
     #[test]
     fn secrets_spoofed_into_env_on_push() {
         let backend = backend(vec![0, 0]);
-        let run = backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
-        assert_eq!(run.unit("build").unwrap().secrets_spoofed, vec!["DEPLOY_TOKEN".to_string()]);
+        let run = backend
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
+        assert_eq!(
+            run.unit("build").unwrap().secrets_spoofed,
+            vec!["DEPLOY_TOKEN".to_string()]
+        );
         let specs = backend.runtime.specs.lock().unwrap();
-        let bs = specs.iter().find(|s| s.command.last().is_some_and(|c| c.contains("cargo build"))).unwrap();
-        assert_eq!(bs.env.iter().find(|(k, _)| k == "DEPLOY_TOKEN").unwrap().1, "spoofed-DEPLOY_TOKEN");
+        let bs = specs
+            .iter()
+            .find(|s| s.command.last().is_some_and(|c| c.contains("cargo build")))
+            .unwrap();
+        assert_eq!(
+            bs.env.iter().find(|(k, _)| k == "DEPLOY_TOKEN").unwrap().1,
+            "spoofed-DEPLOY_TOKEN"
+        );
     }
 
     #[test]
     fn secrets_withheld_on_fork_pr() {
         let backend = backend(vec![0, 0]);
-        let plan = plan_for(&wf_secret_effect(), &EventContext::PullRequest { fork: true }).unwrap();
+        let plan = plan_for(
+            &wf_secret_effect(),
+            &EventContext::PullRequest { fork: true },
+        )
+        .unwrap();
         let run = backend.execute(&plan).unwrap();
         let build = run.unit("build").unwrap();
         assert!(build.secrets_spoofed.is_empty());
         assert_eq!(build.secrets_withheld, vec!["DEPLOY_TOKEN".to_string()]);
         let specs = backend.runtime.specs.lock().unwrap();
-        let bs = specs.iter().find(|s| s.command.last().is_some_and(|c| c.contains("cargo build"))).unwrap();
+        let bs = specs
+            .iter()
+            .find(|s| s.command.last().is_some_and(|c| c.contains("cargo build")))
+            .unwrap();
         assert!(bs.env.iter().all(|(k, _)| k != "DEPLOY_TOKEN"));
     }
 
     #[test]
     fn effects_and_transfers_recorded() {
-        let run = backend(vec![0, 0]).execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        let run = backend(vec![0, 0])
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         assert!(run.effect_fired("deploy"));
         assert_eq!(run.transfer_of("source"), Some(TransferKind::Copy));
     }
 
     #[test]
     fn failure_aborts_and_skips_remaining() {
-        let run = backend(vec![1]).execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        let run = backend(vec![1])
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         assert_eq!(run.unit("checkout").unwrap().status, UnitStatus::Failed(1));
         assert_eq!(run.unit("build").unwrap().status, UnitStatus::Skipped);
     }
@@ -253,9 +336,19 @@ mod tests {
     #[test]
     fn workspace_and_store_mounted() {
         let backend = backend(vec![0, 0]);
-        backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
+        backend
+            .execute(&plan(&wf_secret_effect()).unwrap())
+            .unwrap();
         let specs = backend.runtime.specs.lock().unwrap();
-        assert!(specs.iter().all(|s| s.mounts.iter().any(|m| m.container == "/workspace")));
-        assert!(specs.iter().all(|s| s.mounts.iter().any(|m| m.container == "/loom-artifacts")));
+        assert!(
+            specs
+                .iter()
+                .all(|s| s.mounts.iter().any(|m| m.container == "/workspace"))
+        );
+        assert!(
+            specs
+                .iter()
+                .all(|s| s.mounts.iter().any(|m| m.container == "/loom-artifacts"))
+        );
     }
 }

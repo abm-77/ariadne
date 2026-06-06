@@ -4,15 +4,19 @@
 //! and fusion preserves op order, so no effect is ever reordered.
 
 use super::{OptLevel, OptimizeCtx, Pass};
-use crate::planner::{ExecutionUnit, OptimizationDecision, LogicalOp, Plan};
+use crate::planner::{ExecutionUnit, LogicalOp, OptimizationDecision, Plan};
 use std::collections::HashSet;
 use ustr::Ustr;
 
 pub struct FusionPass;
 
 impl Pass for FusionPass {
-    fn name(&self) -> &str { "fusion" }
-    fn min_level(&self) -> OptLevel { OptLevel::O3 }
+    fn name(&self) -> &str {
+        "fusion"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O3
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         let mut decisions = Vec::new();
@@ -24,7 +28,12 @@ impl Pass for FusionPass {
 
             // Producer's compute ops (drop uploads of artifacts consumed here),
             // then consumer's ops (drop the matching downloads/transfers).
-            let mut ops: Vec<LogicalOp> = producer.ops.iter().filter(|op| !is_upload_of(op, &shared)).cloned().collect();
+            let mut ops: Vec<LogicalOp> = producer
+                .ops
+                .iter()
+                .filter(|op| !is_upload_of(op, &shared))
+                .cloned()
+                .collect();
             ops.extend(consumer.ops.drain(..).filter(|op| !is_pull_of(op, &shared)));
             dedup_input_pulls(&mut ops);
             consumer.ops = ops;
@@ -44,8 +53,10 @@ impl Pass for FusionPass {
                 target: consumer.id.to_string(),
                 from: format!("{} -> {}", producer.action_name, consumer.action_name),
                 to: consumer.action_name.to_string(),
-                reason: format!("fused producer '{}' into sole consumer on shared runner '{}'",
-                    producer.action_name, consumer.runner),
+                reason: format!(
+                    "fused producer '{}' into sole consumer on shared runner '{}'",
+                    producer.action_name, consumer.runner
+                ),
             });
             plan.units.remove(p_idx);
         }
@@ -57,7 +68,9 @@ impl Pass for FusionPass {
 fn next_fusible(plan: &Plan, ctx: &OptimizeCtx) -> Option<(usize, usize)> {
     for (c_idx, consumer) in plan.units.iter().enumerate() {
         for need in &consumer.needs {
-            let Some(p_idx) = plan.units.iter().position(|u| u.id == *need) else { continue };
+            let Some(p_idx) = plan.units.iter().position(|u| u.id == *need) else {
+                continue;
+            };
             let producer = &plan.units[p_idx];
             if dependents(plan, producer.id) != 1 {
                 continue; // producer feeds others; fusing would duplicate work
@@ -86,15 +99,26 @@ fn dependents(plan: &Plan, id: Ustr) -> usize {
 
 /// Producer outputs that the consumer pulls in (uploaded by P, downloaded by C).
 fn shared_artifacts(producer: &ExecutionUnit, consumer: &ExecutionUnit) -> HashSet<Ustr> {
-    let produced: HashSet<Ustr> = producer.ops.iter().filter_map(|op| match op {
-        LogicalOp::UploadArtifact { name, .. } => Some(*name),
-        _ => None,
-    }).collect();
-    consumer.ops.iter().filter_map(|op| match op {
-        LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. }
-            if produced.contains(name) => Some(*name),
-        _ => None,
-    }).collect()
+    let produced: HashSet<Ustr> = producer
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            LogicalOp::UploadArtifact { name, .. } => Some(*name),
+            _ => None,
+        })
+        .collect();
+    consumer
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. }
+                if produced.contains(name) =>
+            {
+                Some(*name)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Both halves of a fused unit may pull the same input (e.g. each downloaded
@@ -107,7 +131,9 @@ pub(super) fn dedup_input_pulls(ops: &mut Vec<LogicalOp>) {
         let key = match op {
             LogicalOp::CheckoutRepo => "checkout".to_string(),
             LogicalOp::DownloadArtifact { name, path } => format!("dl:{name}:{path:?}"),
-            LogicalOp::TransferArtifact { name, path, access } => format!("tr:{name}:{path:?}:{access:?}"),
+            LogicalOp::TransferArtifact { name, path, access } => {
+                format!("tr:{name}:{path:?}:{access:?}")
+            }
             _ => return true,
         };
         seen.insert(key)
@@ -120,13 +146,18 @@ fn is_upload_of(op: &LogicalOp, shared: &HashSet<Ustr>) -> bool {
 
 fn is_pull_of(op: &LogicalOp, shared: &HashSet<Ustr>) -> bool {
     match op {
-        LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. } => shared.contains(name),
+        LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. } => {
+            shared.contains(name)
+        }
         _ => false,
     }
 }
 
 fn caps_superset(consumer: &ExecutionUnit, producer: &ExecutionUnit) -> bool {
-    producer.actor_capabilities.iter().all(|c| consumer.actor_capabilities.contains(c))
+    producer
+        .actor_capabilities
+        .iter()
+        .all(|c| consumer.actor_capabilities.contains(c))
 }
 
 fn merge_unique(into: &mut Vec<Ustr>, from: &[Ustr]) {
@@ -142,8 +173,8 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
-    use crate::optimize::{optimize, OptLevel, OptimizeCtx};
+    use crate::ir::{ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder, default_objectives};
+    use crate::optimize::{OptLevel, OptimizeCtx, optimize};
     use crate::profile::Profile;
 
     fn run(wf: &Workflow, level: OptLevel) -> Plan {
@@ -181,7 +212,11 @@ mod tests {
         assert_eq!(plan.units.len(), 1, "prep should be fused into build");
         let unit = &plan.units[0];
         assert_eq!(unit.action_name.as_str(), "build");
-        assert!(unit.ops.iter().any(|op| matches!(op, LogicalOp::RunShell { script, .. } if script == "echo prep")));
+        assert!(
+            unit.ops.iter().any(
+                |op| matches!(op, LogicalOp::RunShell { script, .. } if script == "echo prep")
+            )
+        );
         // The src transfer is gone (no upload, no download/transfer of "src").
         assert!(plan.access_mode("src").is_none());
         assert!(plan.optimizations.iter().any(|d| d.pass == "fusion"));
@@ -205,11 +240,18 @@ mod tests {
         b.constrain_actor(prep, h);
         b.constrain_actor(build, h);
         let plan = run(&b.build(), OptLevel::O3);
-        let fused = plan.units.iter().find(|u| u.action_name.as_str() == "build").unwrap();
+        let fused = plan
+            .units
+            .iter()
+            .find(|u| u.action_name.as_str() == "build")
+            .unwrap();
         let src_downloads = fused.ops.iter()
             .filter(|op| matches!(op, LogicalOp::DownloadArtifact { name, .. } if name.as_str() == "src"))
             .count();
-        assert_eq!(src_downloads, 1, "shared input should be downloaded exactly once after fusion");
+        assert_eq!(
+            src_downloads, 1,
+            "shared input should be downloaded exactly once after fusion"
+        );
     }
 
     #[test]

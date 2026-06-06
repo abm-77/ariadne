@@ -1,4 +1,4 @@
-use super::{arg_list, def, local, Registry};
+use super::{Registry, arg_list, def, local};
 
 /// Test lowerings. The same `test.unit` action lowers to `cargo test` or
 /// `pytest` purely by which runner the inventory declares.
@@ -17,11 +17,14 @@ pub fn register(r: &mut Registry) {
         ("test.unit.pytest", "test.unit"),
         ("test.integration.pytest", "test.integration"),
     ] {
-        r.register(def(id, action, "pytest", |a| {
-            let mut p = vec!["pytest".into()];
-            p.extend(arg_list(a, "paths"));
-            p.extend(arg_list(a, "args"));
-            local(p)
-        }).with_deps(&["pytest"]));
+        r.register(
+            def(id, action, "pytest", |a| {
+                let mut p = vec!["pytest".into()];
+                p.extend(arg_list(a, "paths"));
+                p.extend(arg_list(a, "args"));
+                local(p)
+            })
+            .with_deps(&["pytest"]),
+        );
     }
 }

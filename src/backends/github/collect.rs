@@ -5,7 +5,9 @@
 //! compute, the implicit `Set up job` step is the per-job setup overhead, and
 //! an artifact is named `<action>/<output>`.
 
-use crate::telemetry::{ActionReport, ArtifactReport, ProfileCollector, RawRun, RunReport, UnitReport};
+use crate::telemetry::{
+    ActionReport, ArtifactReport, ProfileCollector, RawRun, RunReport, UnitReport,
+};
 use chrono::DateTime;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -65,42 +67,62 @@ struct Artifact {
 const SETUP_STEP: &str = "Set up job";
 
 impl ProfileCollector for GithubCollector {
-    fn id(&self) -> &str { "github" }
+    fn id(&self) -> &str {
+        "github"
+    }
 
     fn parse(&self, runs: &[RawRun]) -> Result<Vec<RunReport>, String> {
         runs.iter().map(|r| parse_run(&r.0)).collect()
     }
 
-    fn runner_pricing(&self) -> HashMap<String, f64> { pricing() }
+    fn runner_pricing(&self) -> HashMap<String, f64> {
+        pricing()
+    }
 }
 
 fn parse_run(json: &str) -> Result<RunReport, String> {
-    let bundle: Bundle = serde_json::from_str(json)
-        .map_err(|e| format!("invalid GitHub run telemetry: {e}"))?;
+    let bundle: Bundle =
+        serde_json::from_str(json).map_err(|e| format!("invalid GitHub run telemetry: {e}"))?;
 
-    let units = bundle.jobs.jobs.iter().map(|job| {
-        let actions = job.steps.iter()
-            .filter_map(|s| s.name.strip_prefix("Run ").map(|action| ActionReport {
-                action: action.to_string(),
-                duration_secs: secs_between(&s.started_at, &s.completed_at),
-                failed: matches!(s.conclusion.as_deref(), Some("failure")),
-            }))
-            .collect();
-        let setup_secs = job.steps.iter()
-            .find(|s| s.name == SETUP_STEP)
-            .and_then(|s| secs_between(&s.started_at, &s.completed_at));
-        UnitReport {
-            runner_label: job.labels.first().cloned().unwrap_or_default(),
-            queue_secs: secs_between(&job.created_at, &job.started_at),
-            setup_secs,
-            actions,
-        }
-    }).collect();
+    let units = bundle
+        .jobs
+        .jobs
+        .iter()
+        .map(|job| {
+            let actions = job
+                .steps
+                .iter()
+                .filter_map(|s| {
+                    s.name.strip_prefix("Run ").map(|action| ActionReport {
+                        action: action.to_string(),
+                        duration_secs: secs_between(&s.started_at, &s.completed_at),
+                        failed: matches!(s.conclusion.as_deref(), Some("failure")),
+                    })
+                })
+                .collect();
+            let setup_secs = job
+                .steps
+                .iter()
+                .find(|s| s.name == SETUP_STEP)
+                .and_then(|s| secs_between(&s.started_at, &s.completed_at));
+            UnitReport {
+                runner_label: job.labels.first().cloned().unwrap_or_default(),
+                queue_secs: secs_between(&job.created_at, &job.started_at),
+                setup_secs,
+                actions,
+            }
+        })
+        .collect();
 
-    let artifacts = bundle.artifacts.artifacts.iter().map(|a| ArtifactReport {
-        name: a.name.clone(),
-        size_bytes: a.size_in_bytes,
-    }).collect();
+    let artifacts = bundle
+        .artifacts
+        .artifacts
+        .iter()
+        .map(|a| ArtifactReport {
+            name: a.name.clone(),
+            size_bytes: a.size_in_bytes,
+        })
+        .collect();
 
     Ok(RunReport { units, artifacts })
 }
@@ -117,12 +139,21 @@ fn secs_between(a: &Option<String>, b: &Option<String>) -> Option<f64> {
 /// as published for private repositories; Linux/Windows/macOS standard runners).
 fn pricing() -> HashMap<String, f64> {
     let per_min: &[(&str, f64)] = &[
-        ("ubuntu-latest", 0.008), ("ubuntu-24.04", 0.008),
-        ("ubuntu-22.04", 0.008), ("ubuntu-20.04", 0.008),
-        ("windows-latest", 0.016), ("windows-2022", 0.016), ("windows-2019", 0.016),
-        ("macos-latest", 0.08), ("macos-14", 0.08), ("macos-13", 0.08),
+        ("ubuntu-latest", 0.008),
+        ("ubuntu-24.04", 0.008),
+        ("ubuntu-22.04", 0.008),
+        ("ubuntu-20.04", 0.008),
+        ("windows-latest", 0.016),
+        ("windows-2022", 0.016),
+        ("windows-2019", 0.016),
+        ("macos-latest", 0.08),
+        ("macos-14", 0.08),
+        ("macos-13", 0.08),
     ];
-    per_min.iter().map(|(label, m)| (label.to_string(), m / 60.0)).collect()
+    per_min
+        .iter()
+        .map(|(label, m)| (label.to_string(), m / 60.0))
+        .collect()
 }
 
 #[cfg(test)]
@@ -159,10 +190,18 @@ mod tests {
         assert_eq!(unit.setup_secs, Some(4.0));
         // Only "Run X" steps become actions (not Set up job / Upload artifact).
         assert_eq!(unit.actions.len(), 2);
-        let build = unit.actions.iter().find(|a| a.action == "build_loom").unwrap();
+        let build = unit
+            .actions
+            .iter()
+            .find(|a| a.action == "build_loom")
+            .unwrap();
         assert_eq!(build.duration_secs, Some(30.0));
         assert!(!build.failed);
-        let test = unit.actions.iter().find(|a| a.action == "test_workspace").unwrap();
+        let test = unit
+            .actions
+            .iter()
+            .find(|a| a.action == "test_workspace")
+            .unwrap();
         assert_eq!(test.duration_secs, Some(60.0));
         assert!(test.failed);
     }

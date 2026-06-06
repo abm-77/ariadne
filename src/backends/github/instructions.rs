@@ -1,6 +1,6 @@
 use crate::backends::{
-    BackendKind, Bindings, Capability, Catalogue, CostHint, Instruction, InstructionId,
-    OpMatcher, Stability,
+    BackendKind, Bindings, Capability, Catalogue, CostHint, Instruction, InstructionId, OpMatcher,
+    Stability,
 };
 use serde_json::json;
 
@@ -12,7 +12,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("repo.checkout")],
             requires: vec![Capability::new("github.action_calls.uses")],
             matcher: OpMatcher::for_op("CheckoutRepo"),
-            cost: CostHint { fixed: 5, per_mb: 0 },
+            cost: CostHint {
+                fixed: 5,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -27,7 +30,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("process.exec")],
             requires: vec![],
             matcher: OpMatcher::for_op("RunShell"),
-            cost: CostHint { fixed: 1, per_mb: 0 },
+            cost: CostHint {
+                fixed: 1,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({ "kind": "github.run" }),
             bind: Bindings::default(),
@@ -38,7 +44,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("artifact.upload")],
             requires: vec![Capability::new("github.action_calls.uses")],
             matcher: OpMatcher::for_op("UploadArtifact"),
-            cost: CostHint { fixed: 5, per_mb: 1 },
+            cost: CostHint {
+                fixed: 5,
+                per_mb: 1,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -52,7 +61,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("artifact.download")],
             requires: vec![Capability::new("github.action_calls.uses")],
             matcher: OpMatcher::for_op("DownloadArtifact"),
-            cost: CostHint { fixed: 5, per_mb: 1 },
+            cost: CostHint {
+                fixed: 5,
+                per_mb: 1,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -66,7 +78,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("cache.restore")],
             requires: vec![Capability::new("github.action_calls.uses")],
             matcher: OpMatcher::for_op("RestoreCache"),
-            cost: CostHint { fixed: 5, per_mb: 0 },
+            cost: CostHint {
+                fixed: 5,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -81,7 +96,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("cache.save")],
             requires: vec![Capability::new("github.action_calls.uses")],
             matcher: OpMatcher::for_op("SaveCache"),
-            cost: CostHint { fixed: 5, per_mb: 0 },
+            cost: CostHint {
+                fixed: 5,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -96,7 +114,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![Capability::new("approval.gate")],
             requires: vec![],
             matcher: OpMatcher::for_op("RequestApproval"),
-            cost: CostHint { fixed: 0, per_mb: 0 },
+            cost: CostHint {
+                fixed: 0,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({ "kind": "github.environment" }),
             bind: Bindings::default(),
@@ -114,7 +135,10 @@ pub fn catalogue() -> Catalogue {
                 m.extra.insert("native_id".into(), "scm.checkout".into());
                 m
             },
-            cost: CostHint { fixed: 3, per_mb: 0 },
+            cost: CostHint {
+                fixed: 3,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -136,7 +160,10 @@ pub fn catalogue() -> Catalogue {
                 m.extra.insert("native_id".into(), "package.publish".into());
                 m
             },
-            cost: CostHint { fixed: 4, per_mb: 0 },
+            cost: CostHint {
+                fixed: 4,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({
                 "kind": "github.uses",
@@ -152,7 +179,10 @@ pub fn catalogue() -> Catalogue {
             provides: vec![],
             requires: vec![],
             matcher: OpMatcher::for_op("Native"),
-            cost: CostHint { fixed: 10, per_mb: 0 },
+            cost: CostHint {
+                fixed: 10,
+                per_mb: 0,
+            },
             stability: Stability::Stable,
             implementation: json!({ "kind": "github.run.native" }),
             bind: Bindings::default(),

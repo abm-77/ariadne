@@ -1,8 +1,15 @@
 """Tests for the loom-test authoring DSL (ariadne.testing) and in-process runner."""
 
 from ariadne import (
-    action, workflow, Inventory, Pipeline, scm, build,
-    shell, Consequence, ConsequenceKind,
+    action,
+    workflow,
+    Inventory,
+    Pipeline,
+    scm,
+    build,
+    shell,
+    Consequence,
+    ConsequenceKind,
 )
 from ariadne.artifacts import SourceTree, Binary
 from ariadne.testing import test_case, event, expect

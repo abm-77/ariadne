@@ -16,21 +16,26 @@ class ConsequenceKind(str, Enum):
 
 # Capture rule types for output declarations.
 
+
 @dataclass
 class _FileCapture:
     path: str
+
 
 @dataclass
 class _DirCapture:
     path: str
 
+
 @dataclass
 class _GlobCapture:
     pattern: str
 
+
 @dataclass
 class _RefCapture:
     template: str
+
 
 @dataclass
 class _StdoutCapture:

@@ -73,7 +73,10 @@ pub struct Registry<C> {
 
 impl<C: Candidate> Registry<C> {
     pub fn new() -> Self {
-        Self { items: Vec::new(), by_key: HashMap::new() }
+        Self {
+            items: Vec::new(),
+            by_key: HashMap::new(),
+        }
     }
 
     pub fn from_items(items: Vec<C>) -> Self {
@@ -100,7 +103,11 @@ impl<C: Candidate> Registry<C> {
 
     /// Rules registered under `key`, in registration order.
     pub fn candidates<'a>(&'a self, key: &str) -> impl Iterator<Item = &'a C> {
-        self.by_key.get(key).into_iter().flatten().map(move |&i| &self.items[i])
+        self.by_key
+            .get(key)
+            .into_iter()
+            .flatten()
+            .map(move |&i| &self.items[i])
     }
 }
 
@@ -143,13 +150,24 @@ mod tests {
         cost: u32,
     }
     impl Candidate for Rule {
-        fn key(&self) -> &str { self.key }
-        fn requires(&self) -> &[Capability] { &self.requires }
-        fn stability(&self) -> Stability { self.stability }
+        fn key(&self) -> &str {
+            self.key
+        }
+        fn requires(&self) -> &[Capability] {
+            &self.requires
+        }
+        fn stability(&self) -> Stability {
+            self.stability
+        }
     }
 
     fn rule(reqs: &[&str], stability: Stability, cost: u32) -> Rule {
-        Rule { key: "k", requires: reqs.iter().map(Capability::new).collect(), stability, cost }
+        Rule {
+            key: "k",
+            requires: reqs.iter().map(Capability::new).collect(),
+            stability,
+            cost,
+        }
     }
 
     #[test]
@@ -163,9 +181,9 @@ mod tests {
     #[test]
     fn ranks_by_priority_then_stability_then_order() {
         let rules = [
-            rule(&[], Stability::Stable, 5),   // 0: higher cost
-            rule(&[], Stability::Stable, 1),   // 1: cheapest -> wins
-            rule(&[], Stability::Stable, 1),   // 2: same cost, later -> loses to 1
+            rule(&[], Stability::Stable, 5), // 0: higher cost
+            rule(&[], Stability::Stable, 1), // 1: cheapest -> wins
+            rule(&[], Stability::Stable, 1), // 2: same cost, later -> loses to 1
         ];
         let picked = resolve(rules.iter(), &[], |r| r.cost).unwrap();
         assert_eq!(picked.cost, 1);
@@ -174,8 +192,10 @@ mod tests {
 
     #[test]
     fn stability_breaks_priority_ties() {
-        let rules = [rule(&[], Stability::Experimental, 1),
-            rule(&[], Stability::Stable, 1)];
+        let rules = [
+            rule(&[], Stability::Experimental, 1),
+            rule(&[], Stability::Stable, 1),
+        ];
         let picked = resolve(rules.iter(), &[], |r| r.cost).unwrap();
         assert_eq!(picked.stability, Stability::Stable);
     }
@@ -183,9 +203,24 @@ mod tests {
     #[test]
     fn registry_indexes_candidates_by_key() {
         let mut reg = Registry::new();
-        reg.register(Rule { key: "a", requires: vec![], stability: Stability::Stable, cost: 1 });
-        reg.register(Rule { key: "b", requires: vec![], stability: Stability::Stable, cost: 1 });
-        reg.register(Rule { key: "a", requires: vec![], stability: Stability::Stable, cost: 2 });
+        reg.register(Rule {
+            key: "a",
+            requires: vec![],
+            stability: Stability::Stable,
+            cost: 1,
+        });
+        reg.register(Rule {
+            key: "b",
+            requires: vec![],
+            stability: Stability::Stable,
+            cost: 1,
+        });
+        reg.register(Rule {
+            key: "a",
+            requires: vec![],
+            stability: Stability::Stable,
+            cost: 2,
+        });
         assert_eq!(reg.candidates("a").count(), 2);
         assert_eq!(reg.candidates("b").count(), 1);
         assert_eq!(reg.candidates("missing").count(), 0);

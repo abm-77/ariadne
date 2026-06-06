@@ -48,7 +48,11 @@ fn missing_producer_action_is_error() {
     // but remove checkout from the action_calls list so the index is out of bounds
     wf.action_calls.clear();
     let diags = validate(&wf);
-    assert!(diags.iter().any(|d| d.code == DiagCode::IndexOutOfBounds || d.code == DiagCode::MissingProducer));
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == DiagCode::IndexOutOfBounds || d.code == DiagCode::MissingProducer)
+    );
 }
 
 #[test]
@@ -57,7 +61,10 @@ fn output_not_listed_by_action_is_error() {
     // Clear checkout's outputs while artifact 0 still says producer=0
     wf.action_calls[0].outputs.clear();
     let diags = validate(&wf);
-    assert!(diags.iter().any(|d| d.code == DiagCode::MissingProducer), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == DiagCode::MissingProducer),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -80,7 +87,10 @@ fn out_of_bounds_effect_ref_is_error() {
 #[test]
 fn cycle_is_detected() {
     let diags = validate(&cyclic_workflow());
-    assert!(diags.iter().any(|d| d.code == DiagCode::CycleDetected), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == DiagCode::CycleDetected),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -90,5 +100,9 @@ fn unused_external_input_is_a_warning() {
     let src = b.artifact("src", ArtifactType::SourceTree);
     b.action("checkout", "checkout", &[], &[src]);
     let diags = validate(&b.build());
-    assert!(diags.iter().any(|d| d.code == DiagCode::UnusedInput && d.severity == Severity::Warning));
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == DiagCode::UnusedInput && d.severity == Severity::Warning)
+    );
 }

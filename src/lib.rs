@@ -1,20 +1,20 @@
-pub mod ir;
-pub mod proto;
-pub mod diagnostics;
-pub mod select;
-pub mod validate;
 pub mod analysis;
-pub mod profile;
-pub mod dependency;
-pub mod toolchain;
-pub mod cost;
-pub mod lowering;
-pub mod planner;
-pub mod optimize;
 pub mod backends;
+pub mod cost;
+pub mod dependency;
+pub mod diagnostics;
+pub mod docs;
+pub mod ir;
+pub mod lowering;
+pub mod optimize;
+pub mod planner;
+pub mod profile;
+pub mod proto;
+pub mod select;
 pub mod telemetry;
 pub mod testing;
-pub mod docs;
+pub mod toolchain;
+pub mod validate;
 
 pub use ir::Workflow;
 

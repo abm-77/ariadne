@@ -7,23 +7,36 @@ use super::{OptLevel, OptimizeCtx, Pass};
 use crate::backends::BackendCapabilities;
 use crate::diagnostics::{DiagCode, Diagnostic};
 use crate::ir::PlacementStrategy;
-use crate::planner::{AccessMode, ExecutionUnit, OptimizationDecision, LogicalOp, Plan, MOUNT_CAPABILITY};
+use crate::planner::{
+    AccessMode, ExecutionUnit, LogicalOp, MOUNT_CAPABILITY, OptimizationDecision, Plan,
+};
 use ustr::Ustr;
 
 pub struct PlacementPass;
 
 impl Pass for PlacementPass {
-    fn name(&self) -> &str { "placement" }
-    fn min_level(&self) -> OptLevel { OptLevel::O1 }
+    fn name(&self) -> &str {
+        "placement"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O1
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         let mut decisions = Vec::new();
 
         // Artifacts the workflow asked to place on shared/local storage — the
         // signal that the user wants something better than copy.
-        let shared: Vec<Ustr> = ctx.workflow.placements.iter()
-            .filter(|p| matches!(p.strategy,
-                PlacementStrategy::SharedVolume { .. } | PlacementStrategy::LocalPath { .. }))
+        let shared: Vec<Ustr> = ctx
+            .workflow
+            .placements
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p.strategy,
+                    PlacementStrategy::SharedVolume { .. } | PlacementStrategy::LocalPath { .. }
+                )
+            })
             .map(|p| ctx.workflow.artifact(p.artifact).name)
             .collect();
 
@@ -32,8 +45,11 @@ impl Pass for PlacementPass {
                 continue; // not a cross-unit copy (nothing to upgrade)
             }
             let mountable = ctx.backend_caps.contains(BackendCapabilities::MOUNTS)
-                && plan.units.iter().filter(|u| touches(u, name))
-                    .all(|u| u.actor_capabilities.iter().any(|c| c.as_str() == MOUNT_CAPABILITY));
+                && plan.units.iter().filter(|u| touches(u, name)).all(|u| {
+                    u.actor_capabilities
+                        .iter()
+                        .any(|c| c.as_str() == MOUNT_CAPABILITY)
+                });
 
             if mountable {
                 upgrade_to_mount(plan, name);
@@ -64,7 +80,9 @@ impl Pass for PlacementPass {
 
 fn touches(unit: &ExecutionUnit, name: Ustr) -> bool {
     unit.ops.iter().any(|op| match op {
-        LogicalOp::UploadArtifact { name: n, .. } | LogicalOp::DownloadArtifact { name: n, .. } => *n == name,
+        LogicalOp::UploadArtifact { name: n, .. } | LogicalOp::DownloadArtifact { name: n, .. } => {
+            *n == name
+        }
         _ => false,
     })
 }
@@ -73,12 +91,20 @@ fn touches(unit: &ExecutionUnit, name: Ustr) -> bool {
 fn upgrade_to_mount(plan: &mut Plan, name: Ustr) {
     for unit in &mut plan.units {
         let ops = std::mem::take(&mut unit.ops);
-        unit.ops = ops.into_iter().filter_map(|op| match op {
-            LogicalOp::DownloadArtifact { name: n, path } if n == name =>
-                Some(LogicalOp::TransferArtifact { name: n, path, access: AccessMode::MountReadOnly }),
-            LogicalOp::UploadArtifact { name: n, .. } if n == name => None,
-            other => Some(other),
-        }).collect();
+        unit.ops = ops
+            .into_iter()
+            .filter_map(|op| match op {
+                LogicalOp::DownloadArtifact { name: n, path } if n == name => {
+                    Some(LogicalOp::TransferArtifact {
+                        name: n,
+                        path,
+                        access: AccessMode::MountReadOnly,
+                    })
+                }
+                LogicalOp::UploadArtifact { name: n, .. } if n == name => None,
+                other => Some(other),
+            })
+            .collect();
     }
 }
 
@@ -86,7 +112,7 @@ fn upgrade_to_mount(plan: &mut Plan, name: Ustr) {
 mod tests {
     use super::*;
     use crate::analysis::Analysis;
-    use crate::ir::{default_objectives, ArtifactType, PlacementStrategy, WorkflowBuilder};
+    use crate::ir::{ArtifactType, PlacementStrategy, WorkflowBuilder, default_objectives};
     use crate::optimize::optimize;
     use crate::profile::Profile;
 
@@ -99,7 +125,12 @@ mod tests {
         let actor = b.actor("big", &["self-hosted"], &["mount"]);
         b.constrain_actor(prep, actor);
         b.constrain_actor(build, actor);
-        b.place(src, PlacementStrategy::SharedVolume { path: "/vol".into() });
+        b.place(
+            src,
+            PlacementStrategy::SharedVolume {
+                path: "/vol".into(),
+            },
+        );
         b.build()
     }
 
@@ -127,11 +158,19 @@ mod tests {
 
     #[test]
     fn upgrades_to_mount_when_available() {
-        let plan = run(&shared_wf(), BackendCapabilities::MOUNTS | BackendCapabilities::COLOCATION);
+        let plan = run(
+            &shared_wf(),
+            BackendCapabilities::MOUNTS | BackendCapabilities::COLOCATION,
+        );
         assert_eq!(plan.access_mode("src"), Some(AccessMode::MountReadOnly));
         // The producer's upload was dropped (mounted, not uploaded).
         let prep = plan.units.iter().find(|u| u.action_name == "prep").unwrap();
-        assert!(!prep.ops.iter().any(|op| matches!(op, LogicalOp::UploadArtifact { .. })));
+        assert!(
+            !prep
+                .ops
+                .iter()
+                .any(|op| matches!(op, LogicalOp::UploadArtifact { .. }))
+        );
         assert!(plan.optimizations.iter().any(|d| d.to == "mount_read_only"));
     }
 
@@ -140,7 +179,11 @@ mod tests {
         // GitHub-like backend: no mounts.
         let plan = run(&shared_wf(), BackendCapabilities::CACHE);
         assert_eq!(plan.access_mode("src"), Some(AccessMode::Copy));
-        assert!(plan.diagnostics.iter().any(|d| d.to_string().contains("mount unavailable")));
+        assert!(
+            plan.diagnostics
+                .iter()
+                .any(|d| d.to_string().contains("mount unavailable"))
+        );
     }
 
     #[test]

@@ -221,7 +221,9 @@ class TestConsequences:
     def test_named_consequence_in_tir(self):
         @action(
             outputs={"image": SourceTree},
-            consequences=[Consequence("deploy", ConsequenceKind.Deployment, requires_approval=True)],
+            consequences=[
+                Consequence("deploy", ConsequenceKind.Deployment, requires_approval=True)
+            ],
         )
         def deploy_image(src: SourceTree):
             return shell("kubectl apply -f .")

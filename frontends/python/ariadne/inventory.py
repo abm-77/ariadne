@@ -77,12 +77,14 @@ class Inventory:
     ) -> "Inventory":
         """Declare an execution resource. selector maps to TIR actor labels.
         resources advertises what the actor provides for action selection."""
-        self._actors.append(_InvActor(
-            id=id,
-            labels=selector or [],
-            capabilities=capabilities or [],
-            resources=resources,
-        ))
+        self._actors.append(
+            _InvActor(
+                id=id,
+                labels=selector or [],
+                capabilities=capabilities or [],
+                resources=resources,
+            )
+        )
         return self
 
     def placement(
@@ -93,12 +95,14 @@ class Inventory:
         accessible_by: list[str] | None = None,
     ) -> "Inventory":
         """Declare a placement provider."""
-        self._placements.append(_InvPlacement(
-            id=id,
-            kind=kind,
-            access_modes=access_modes or [],
-            accessible_by=accessible_by or [],
-        ))
+        self._placements.append(
+            _InvPlacement(
+                id=id,
+                kind=kind,
+                access_modes=access_modes or [],
+                accessible_by=accessible_by or [],
+            )
+        )
         return self
 
     def use(
@@ -113,12 +117,14 @@ class Inventory:
         channel is an alias for version, for tools that use channel semantics
         (e.g. rust channel='stable').
         """
-        self._implementations.append(_InvImpl(
-            id=id,
-            version=version or channel,
-            prefer=prefer,
-            deny=False,
-        ))
+        self._implementations.append(
+            _InvImpl(
+                id=id,
+                version=version or channel,
+                prefer=prefer,
+                deny=False,
+            )
+        )
         return self
 
     def prefer(self, id: str, version: str | None = None) -> "Inventory":

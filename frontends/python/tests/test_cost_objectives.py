@@ -54,7 +54,9 @@ def test_latency_first_keeps_siblings_parallel():
 
 
 def test_cost_first_packs_siblings():
-    latency = Pipeline(_fan_out(cost_first=False)).compile(backend="github", level=3, profile=PROFILE)
+    latency = Pipeline(_fan_out(cost_first=False)).compile(
+        backend="github", level=3, profile=PROFILE
+    )
     cost = Pipeline(_fan_out(cost_first=True)).compile(backend="github", level=3, profile=PROFILE)
     # Same workflow; only the objective order differs. Dollars-first packs the
     # three independent siblings onto one job.

@@ -40,8 +40,9 @@ class WorkflowGraph:
             _current.reset(self._token)
             self._token = None
 
-    def _add_artifact(self, name: str, ty_tir: object, path: str | None = None,
-                      lifetime: str | None = None) -> int:
+    def _add_artifact(
+        self, name: str, ty_tir: object, path: str | None = None, lifetime: str | None = None
+    ) -> int:
         id_ = len(self._artifacts)
         entry: dict = {"name": name, "ty": ty_tir, "_producer": None}
         if path is not None:

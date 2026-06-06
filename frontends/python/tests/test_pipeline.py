@@ -71,18 +71,16 @@ class TestValidate:
         tir["action_defs"] = [
             {
                 "id": "build",
-                "inputs": [
-                    {"name": "src", "ty": "Wheel", "kind": "artifact"}
-                ],
+                "inputs": [{"name": "src", "ty": "Wheel", "kind": "artifact"}],
                 "outputs": [{"name": "binary", "ty": "Binary", "kind": "artifact"}],
             }
         ]
         p = ariadne_core.Pipeline(json.dumps(tir))
         all_diags = p.validate()
         errs = [d for d in all_diags if "[error]" in d]
-        assert any("TypeMismatch" in e or "ActionPortMismatch" in e or "Wheel" in e for e in errs), (
-            f"Expected type mismatch error, got: {all_diags}"
-        )
+        assert any(
+            "TypeMismatch" in e or "ActionPortMismatch" in e or "Wheel" in e for e in errs
+        ), f"Expected type mismatch error, got: {all_diags}"
 
 
 class TestPlan:

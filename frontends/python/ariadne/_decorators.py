@@ -213,8 +213,9 @@ def action(
     return decorator
 
 
-def workflow(_fn: Any = None, *, inventory: Any = None, triggers: Any = None,
-             coordination: Any = None):
+def workflow(
+    _fn: Any = None, *, inventory: Any = None, triggers: Any = None, coordination: Any = None
+):
     """Decorator that runs a function as a workflow graph builder.
 
     Can be used bare (@workflow) or configured
@@ -239,6 +240,7 @@ def workflow(_fn: Any = None, *, inventory: Any = None, triggers: Any = None,
             finally:
                 _current.reset(token)
             return graph
+
         return wrapper
 
     if _fn is not None:

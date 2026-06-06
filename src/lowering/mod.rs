@@ -53,7 +53,11 @@ pub enum LoweringBody {
     /// native step is an emit-time, backend-aware decision, never a plan-time one.
     /// `scm.checkout` is just an instance of this: fallback `git checkout .`,
     /// upgraded to `actions/checkout@v4` on GitHub.
-    Native { id: String, args: BTreeMap<String, String>, fallback: String },
+    Native {
+        id: String,
+        args: BTreeMap<String, String>,
+        fallback: String,
+    },
 }
 
 /// How an implementation realizes a semantic action. `build` constructs the
@@ -83,9 +87,15 @@ impl LoweringDef {
 }
 
 impl Candidate for LoweringDef {
-    fn key(&self) -> &str { self.action }
-    fn requires(&self) -> &[Capability] { &self.requirements }
-    fn stability(&self) -> Stability { self.stability }
+    fn key(&self) -> &str {
+        self.action
+    }
+    fn requires(&self) -> &[Capability] {
+        &self.requirements
+    }
+    fn stability(&self) -> Stability {
+        self.stability
+    }
 }
 
 /// The concrete realization handed to the planner. Maps onto the existing
@@ -95,7 +105,11 @@ pub enum Realization {
     Shell(String),
     /// A portable semantic instruction with a shell fallback; backends decide
     /// emit-time whether to upgrade it to a native step.
-    Native { id: String, args: BTreeMap<String, String>, fallback: String },
+    Native {
+        id: String,
+        args: BTreeMap<String, String>,
+        fallback: String,
+    },
 }
 
 /// The outcome of selection: the chosen lowering, what it realizes to, and a
@@ -187,7 +201,9 @@ impl Registry {
             if denied(def.implementation) || !select::requirements_met(def, actor_caps) {
                 return Err(Diagnostic::error(
                     DiagCode::NoCompatibleImplementation,
-                    format!("pinned implementation '{want}' for '{action}' is denied or has unmet requirements"),
+                    format!(
+                        "pinned implementation '{want}' for '{action}' is denied or has unmet requirements"
+                    ),
                 ));
             }
             return Ok(Selection {
@@ -199,7 +215,11 @@ impl Registry {
             });
         }
         let preferred = |impl_id: &str| {
-            inv.is_some_and(|i| i.implementations.iter().any(|m| m.id == impl_id && m.prefer))
+            inv.is_some_and(|i| {
+                i.implementations
+                    .iter()
+                    .any(|m| m.id == impl_id && m.prefer)
+            })
         };
         let available = |impl_id: &str| {
             inv.is_some_and(|i| i.implementations.iter().any(|m| m.id == impl_id && !m.deny))
@@ -208,14 +228,20 @@ impl Registry {
         // declared-available (1) beats undeclared default (2). It never excludes
         // (silent inventory still yields a default) — deny does the excluding.
         let priority = |d: &LoweringDef| {
-            if preferred(d.implementation) { 0 }
-            else if available(d.implementation) { 1 }
-            else { 2 }
+            if preferred(d.implementation) {
+                0
+            } else if available(d.implementation) {
+                1
+            } else {
+                2
+            }
         };
 
         // Deny is the lowering-specific exclusion; the actor-capability gate is
         // hard. Materialize the eligible candidates once.
-        let eligible: Vec<&LoweringDef> = cands.iter().copied()
+        let eligible: Vec<&LoweringDef> = cands
+            .iter()
+            .copied()
             .filter(|d| !denied(d.implementation))
             .filter(|d| select::requirements_met(*d, actor_caps))
             .collect();
@@ -231,7 +257,11 @@ impl Registry {
         // A scoped `impl`/`impls` binding softly prefers these implementations,
         // in order, where one is an eligible candidate for this action.
         for want in prefer {
-            if let Some(def) = eligible.iter().copied().find(|d| d.implementation == want.as_str()) {
+            if let Some(def) = eligible
+                .iter()
+                .copied()
+                .find(|d| d.implementation == want.as_str())
+            {
                 return Ok(Selection {
                     lowering_id: def.id.to_string(),
                     implementation: def.implementation.to_string(),
@@ -247,8 +277,14 @@ impl Registry {
             .expect("eligible is non-empty");
         let why = match priority(def) {
             0 => format!("inventory prefers implementation '{}'", def.implementation),
-            1 => format!("implementation '{}' available in inventory", def.implementation),
-            _ => format!("default implementation '{}' (inventory silent)", def.implementation),
+            1 => format!(
+                "implementation '{}' available in inventory",
+                def.implementation
+            ),
+            _ => format!(
+                "default implementation '{}' (inventory silent)",
+                def.implementation
+            ),
         };
 
         Ok(Selection {
@@ -310,11 +346,16 @@ pub(crate) fn arg_list(args: &Args, key: &str) -> Vec<String> {
 }
 
 pub(crate) fn local(parts: Vec<String>) -> LoweringBody {
-    LoweringBody::LocalExec { script: parts.join(" ") }
+    LoweringBody::LocalExec {
+        script: parts.join(" "),
+    }
 }
 
 pub(crate) fn container(image: &str, parts: Vec<String>) -> LoweringBody {
-    LoweringBody::ContainerExec { image: image.to_string(), script: parts.join(" ") }
+    LoweringBody::ContainerExec {
+        image: image.to_string(),
+        script: parts.join(" "),
+    }
 }
 
 /// Build a stable lowering def with no requirements. Packs use this for the
@@ -346,16 +387,36 @@ mod tests {
     use ustr::Ustr;
 
     fn inv(impls: Vec<InventoryImpl>) -> Inventory {
-        Inventory { id: "t".into(), actors: vec![], placements: vec![], implementations: impls }
+        Inventory {
+            id: "t".into(),
+            actors: vec![],
+            placements: vec![],
+            implementations: impls,
+        }
     }
     fn used(id: &str) -> InventoryImpl {
-        InventoryImpl { id: Ustr::from(id), version: None, prefer: false, deny: false }
+        InventoryImpl {
+            id: Ustr::from(id),
+            version: None,
+            prefer: false,
+            deny: false,
+        }
     }
     fn pref(id: &str) -> InventoryImpl {
-        InventoryImpl { id: Ustr::from(id), version: None, prefer: true, deny: false }
+        InventoryImpl {
+            id: Ustr::from(id),
+            version: None,
+            prefer: true,
+            deny: false,
+        }
     }
     fn denied(id: &str) -> InventoryImpl {
-        InventoryImpl { id: Ustr::from(id), version: None, prefer: false, deny: true }
+        InventoryImpl {
+            id: Ustr::from(id),
+            version: None,
+            prefer: false,
+            deny: true,
+        }
     }
 
     fn reg() -> Registry {
@@ -369,31 +430,47 @@ mod tests {
         // actor's system manager), so we exercise the pinned lowerings here.
         let mut a = Args::new();
         a.insert("package".into(), json!("maturin"));
-        let pip = reg().select_using("package.install", &a, None, &[], Some("pip"), &[]).unwrap();
+        let pip = reg()
+            .select_using("package.install", &a, None, &[], Some("pip"), &[])
+            .unwrap();
         assert!(matches!(pip.realization, Realization::Shell(s) if s == "pip install maturin"));
 
         let mut g = Args::new();
         g.insert("package".into(), json!("git"));
-        let apt = reg().select_using("package.install", &g, None, &[], Some("apt"), &[]).unwrap();
-        assert!(matches!(apt.realization, Realization::Shell(s) if s == "sudo apt-get install -y git"));
-        let dnf = reg().select_using("package.install", &g, None, &[], Some("dnf"), &[]).unwrap();
+        let apt = reg()
+            .select_using("package.install", &g, None, &[], Some("apt"), &[])
+            .unwrap();
+        assert!(
+            matches!(apt.realization, Realization::Shell(s) if s == "sudo apt-get install -y git")
+        );
+        let dnf = reg()
+            .select_using("package.install", &g, None, &[], Some("dnf"), &[])
+            .unwrap();
         assert!(matches!(dnf.realization, Realization::Shell(s) if s == "sudo dnf install -y git"));
 
         let mut c = Args::new();
         c.insert("package".into(), json!("cargo-llvm-cov"));
-        let cargo = reg().select_using("package.install", &c, None, &[], Some("cargo"), &[]).unwrap();
-        assert!(matches!(cargo.realization, Realization::Shell(s) if s == "cargo install cargo-llvm-cov"));
+        let cargo = reg()
+            .select_using("package.install", &c, None, &[], Some("cargo"), &[])
+            .unwrap();
+        assert!(
+            matches!(cargo.realization, Realization::Shell(s) if s == "cargo install cargo-llvm-cov")
+        );
     }
 
     #[test]
     fn unknown_action_errors() {
-        let err = reg().select("nope.nope", &Args::new(), None, &[]).unwrap_err();
+        let err = reg()
+            .select("nope.nope", &Args::new(), None, &[])
+            .unwrap_err();
         assert_eq!(err.code, DiagCode::UnknownSemanticOp);
     }
 
     #[test]
     fn checkout_realizes_to_native_with_git_fallback() {
-        let sel = reg().select("scm.checkout", &Args::new(), None, &[]).unwrap();
+        let sel = reg()
+            .select("scm.checkout", &Args::new(), None, &[])
+            .unwrap();
         match &sel.realization {
             Realization::Native { id, fallback, .. } => {
                 assert_eq!(id, "scm.checkout");
@@ -407,7 +484,9 @@ mod tests {
 
     #[test]
     fn silent_inventory_uses_cheapest_default() {
-        let sel = reg().select("build.python_wheel", &Args::new(), None, &[]).unwrap();
+        let sel = reg()
+            .select("build.python_wheel", &Args::new(), None, &[])
+            .unwrap();
         assert_eq!(sel.implementation, "maturin");
         assert!(sel.reason.contains("silent"));
     }
@@ -415,7 +494,9 @@ mod tests {
     #[test]
     fn available_beats_default() {
         let i = inv(vec![used("uv")]);
-        let sel = reg().select("build.python_wheel", &Args::new(), Some(&i), &[]).unwrap();
+        let sel = reg()
+            .select("build.python_wheel", &Args::new(), Some(&i), &[])
+            .unwrap();
         assert_eq!(sel.implementation, "uv");
         assert_eq!(sel.lowering_id, "build.python_wheel.uv");
     }
@@ -423,7 +504,9 @@ mod tests {
     #[test]
     fn preferred_beats_available() {
         let i = inv(vec![used("maturin"), pref("uv")]);
-        let sel = reg().select("build.python_wheel", &Args::new(), Some(&i), &[]).unwrap();
+        let sel = reg()
+            .select("build.python_wheel", &Args::new(), Some(&i), &[])
+            .unwrap();
         assert_eq!(sel.implementation, "uv");
         assert!(sel.reason.contains("prefers"));
     }
@@ -445,14 +528,18 @@ mod tests {
     #[test]
     fn deny_excludes_and_falls_through() {
         let i = inv(vec![denied("maturin")]);
-        let sel = reg().select("build.python_wheel", &Args::new(), Some(&i), &[]).unwrap();
+        let sel = reg()
+            .select("build.python_wheel", &Args::new(), Some(&i), &[])
+            .unwrap();
         assert_ne!(sel.implementation, "maturin");
     }
 
     #[test]
     fn all_denied_errors() {
         let i = inv(vec![denied("git")]);
-        let err = reg().select("scm.checkout", &Args::new(), Some(&i), &[]).unwrap_err();
+        let err = reg()
+            .select("scm.checkout", &Args::new(), Some(&i), &[])
+            .unwrap_err();
         assert_eq!(err.code, DiagCode::NoCompatibleImplementation);
     }
 
@@ -468,10 +555,17 @@ mod tests {
             stability: Stability::Stable,
             build: |_| local(vec!["docker".into(), "build".into()]),
         });
-        let err = r.select("build.container_image", &Args::new(), None, &[]).unwrap_err();
+        let err = r
+            .select("build.container_image", &Args::new(), None, &[])
+            .unwrap_err();
         assert_eq!(err.code, DiagCode::NoCompatibleImplementation);
         let sel = r
-            .select("build.container_image", &Args::new(), None, &[Capability::new("docker")])
+            .select(
+                "build.container_image",
+                &Args::new(),
+                None,
+                &[Capability::new("docker")],
+            )
             .unwrap();
         assert_eq!(sel.implementation, "docker");
     }
@@ -481,8 +575,13 @@ mod tests {
         let mut a = Args::new();
         a.insert("release".into(), json!(true));
         a.insert("package".into(), json!("loom"));
-        let sel = reg().select("build.binary", &a, Some(&inv(vec![used("cargo")])), &[]).unwrap();
-        assert_eq!(sel.realization, Realization::Shell("cargo build --release --package loom".into()));
+        let sel = reg()
+            .select("build.binary", &a, Some(&inv(vec![used("cargo")])), &[])
+            .unwrap();
+        assert_eq!(
+            sel.realization,
+            Realization::Shell("cargo build --release --package loom".into())
+        );
     }
 
     #[test]
@@ -495,7 +594,8 @@ mod tests {
         assert_eq!(
             sel.realization,
             Realization::Shell(
-                "maturin build --release --manifest-path crates/ariadne-py/Cargo.toml --out dist".into()
+                "maturin build --release --manifest-path crates/ariadne-py/Cargo.toml --out dist"
+                    .into()
             )
         );
     }
@@ -504,14 +604,24 @@ mod tests {
     fn test_unit_lowers_to_cargo_or_pytest_by_inventory() {
         let mut a = Args::new();
         a.insert("args".into(), json!(["--workspace"]));
-        let cargo = reg().select("test.unit", &a, Some(&inv(vec![used("cargo")])), &[]).unwrap();
-        assert_eq!(cargo.realization, Realization::Shell("cargo test --workspace".into()));
+        let cargo = reg()
+            .select("test.unit", &a, Some(&inv(vec![used("cargo")])), &[])
+            .unwrap();
+        assert_eq!(
+            cargo.realization,
+            Realization::Shell("cargo test --workspace".into())
+        );
 
         let mut b = Args::new();
         b.insert("paths".into(), json!(["tests/"]));
         b.insert("args".into(), json!(["-v"]));
-        let py = reg().select("test.unit", &b, Some(&inv(vec![used("pytest")])), &[]).unwrap();
-        assert_eq!(py.realization, Realization::Shell("pytest tests/ -v".into()));
+        let py = reg()
+            .select("test.unit", &b, Some(&inv(vec![used("pytest")])), &[])
+            .unwrap();
+        assert_eq!(
+            py.realization,
+            Realization::Shell("pytest tests/ -v".into())
+        );
     }
 
     #[test]
@@ -520,13 +630,20 @@ mod tests {
         let i = inv(vec![used("cargo"), used("pytest")]);
         let mut a = Args::new();
         a.insert("args".into(), json!(["--workspace"]));
-        let cargo = reg().select_using("test.unit", &a, Some(&i), &[], Some("cargo"), &[]).unwrap();
-        assert_eq!(cargo.realization, Realization::Shell("cargo test --workspace".into()));
+        let cargo = reg()
+            .select_using("test.unit", &a, Some(&i), &[], Some("cargo"), &[])
+            .unwrap();
+        assert_eq!(
+            cargo.realization,
+            Realization::Shell("cargo test --workspace".into())
+        );
         assert!(cargo.reason.contains("pins implementation 'cargo'"));
 
         let mut b = Args::new();
         b.insert("paths".into(), json!(["tests/"]));
-        let py = reg().select_using("test.unit", &b, Some(&i), &[], Some("pytest"), &[]).unwrap();
+        let py = reg()
+            .select_using("test.unit", &b, Some(&i), &[], Some("pytest"), &[])
+            .unwrap();
         assert_eq!(py.realization, Realization::Shell("pytest tests/".into()));
     }
 
@@ -542,7 +659,14 @@ mod tests {
     fn using_denied_implementation_errors() {
         let i = inv(vec![denied("pytest")]);
         let err = reg()
-            .select_using("test.unit", &Args::new(), Some(&i), &[], Some("pytest"), &[])
+            .select_using(
+                "test.unit",
+                &Args::new(),
+                Some(&i),
+                &[],
+                Some("pytest"),
+                &[],
+            )
             .unwrap_err();
         assert_eq!(err.code, DiagCode::NoCompatibleImplementation);
     }
@@ -557,11 +681,16 @@ mod tests {
             requirements: vec![],
             dependencies: vec![],
             stability: Stability::Stable,
-            build: |a| container(
-                "registry.company.com/build/python-wheel:latest",
-                vec!["company-build-wheel".into(), "--package".into(),
-                     arg_str(a, "package").unwrap_or_default()],
-            ),
+            build: |a| {
+                container(
+                    "registry.company.com/build/python-wheel:latest",
+                    vec![
+                        "company-build-wheel".into(),
+                        "--package".into(),
+                        arg_str(a, "package").unwrap_or_default(),
+                    ],
+                )
+            },
         });
         let i = inv(vec![pref("company-wheel-builder")]);
         let mut a = Args::new();

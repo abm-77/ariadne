@@ -4,15 +4,19 @@
 //! outputs. Effectful or barrier units are never deduplicated.
 
 use super::{OptLevel, OptimizeCtx, Pass};
-use crate::planner::{ExecutionUnit, OptimizationDecision, LogicalOp, Plan};
+use crate::planner::{ExecutionUnit, LogicalOp, OptimizationDecision, Plan};
 use std::collections::HashMap;
 use ustr::Ustr;
 
 pub struct DeduplicationPass;
 
 impl Pass for DeduplicationPass {
-    fn name(&self) -> &str { "dedup" }
-    fn min_level(&self) -> OptLevel { OptLevel::O3 }
+    fn name(&self) -> &str {
+        "dedup"
+    }
+    fn min_level(&self) -> OptLevel {
+        OptLevel::O3
+    }
 
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         let mut seen: Vec<(Vec<String>, Ustr, Vec<Ustr>)> = Vec::new();
@@ -60,7 +64,8 @@ impl Pass for DeduplicationPass {
                 }
             }
             for op in &mut u.ops {
-                if let LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. } = op
+                if let LogicalOp::DownloadArtifact { name, .. }
+                | LogicalOp::TransferArtifact { name, .. } = op
                     && let Some(k) = out_remap.get(name)
                 {
                     *name = *k;
@@ -85,7 +90,9 @@ fn signature(u: &ExecutionUnit) -> Vec<String> {
                 sig.push(format!("R:{script}:{}", e.join(",")));
             }
             LogicalOp::DownloadArtifact { name, .. } => sig.push(format!("D:{name}")),
-            LogicalOp::TransferArtifact { name, access, .. } => sig.push(format!("T:{name}:{access:?}")),
+            LogicalOp::TransferArtifact { name, access, .. } => {
+                sig.push(format!("T:{name}:{access:?}"))
+            }
             LogicalOp::RestoreCache { key } => sig.push(format!("RC:{key}")),
             LogicalOp::SaveCache { key } => sig.push(format!("SC:{key}")),
             LogicalOp::RequestApproval { reason } => sig.push(format!("AP:{reason}")),
@@ -100,10 +107,13 @@ fn signature(u: &ExecutionUnit) -> Vec<String> {
 }
 
 fn outputs(u: &ExecutionUnit) -> Vec<Ustr> {
-    u.ops.iter().filter_map(|op| match op {
-        LogicalOp::UploadArtifact { name, .. } => Some(*name),
-        _ => None,
-    }).collect()
+    u.ops
+        .iter()
+        .filter_map(|op| match op {
+            LogicalOp::UploadArtifact { name, .. } => Some(*name),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -111,8 +121,8 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
-    use crate::optimize::{optimize, OptLevel, OptimizeCtx};
+    use crate::ir::{ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder, default_objectives};
+    use crate::optimize::{OptLevel, OptimizeCtx, optimize};
     use crate::profile::Profile;
 
     fn run(wf: &Workflow, level: OptLevel) -> Plan {
@@ -152,12 +162,29 @@ mod tests {
     fn drops_duplicate_and_rewires_consumer() {
         let plan = run(&dup_wf(), OptLevel::O3);
         // gen_b removed; gen_a + use_1 + use_2 remain.
-        assert_eq!(plan.units.len(), 3, "{:?}", plan.units.iter().map(|u| u.action_name).collect::<Vec<_>>());
-        let gen_a = plan.units.iter().find(|u| u.action_name == "gen_a").unwrap();
-        let use_2 = plan.units.iter().find(|u| u.action_name == "use_2").unwrap();
+        assert_eq!(
+            plan.units.len(),
+            3,
+            "{:?}",
+            plan.units.iter().map(|u| u.action_name).collect::<Vec<_>>()
+        );
+        let gen_a = plan
+            .units
+            .iter()
+            .find(|u| u.action_name == "gen_a")
+            .unwrap();
+        let use_2 = plan
+            .units
+            .iter()
+            .find(|u| u.action_name == "use_2")
+            .unwrap();
         // use_2 was rewired onto gen_a and its output "tool_a".
         assert!(use_2.needs.contains(&gen_a.id));
-        assert!(use_2.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { name, .. } if name == "tool_a")));
+        assert!(
+            use_2.ops.iter().any(
+                |op| matches!(op, LogicalOp::DownloadArtifact { name, .. } if name == "tool_a")
+            )
+        );
         assert!(plan.optimizations.iter().any(|d| d.pass == "dedup"));
     }
 

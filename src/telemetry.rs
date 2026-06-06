@@ -61,7 +61,9 @@ pub trait ProfileCollector: Send + Sync {
     fn parse(&self, runs: &[RawRun]) -> Result<Vec<RunReport>, String>;
     /// Known runner price in dollars per second, by runner label. Empty by
     /// default (e.g. self-hosted has no list price).
-    fn runner_pricing(&self) -> HashMap<String, f64> { HashMap::new() }
+    fn runner_pricing(&self) -> HashMap<String, f64> {
+        HashMap::new()
+    }
 }
 
 /// Aggregate many run reports into a `Profile` by averaging each observed
@@ -78,17 +80,27 @@ pub fn aggregate(runs: &[RunReport], pricing: &HashMap<String, f64>) -> Profile 
     for run in runs {
         for u in &run.units {
             labels.insert(u.runner_label.clone());
-            if let Some(q) = u.queue_secs { queue.entry(u.runner_label.clone()).or_default().add(q); }
-            if let Some(s) = u.setup_secs { setup.entry(u.runner_label.clone()).or_default().add(s); }
+            if let Some(q) = u.queue_secs {
+                queue.entry(u.runner_label.clone()).or_default().add(q);
+            }
+            if let Some(s) = u.setup_secs {
+                setup.entry(u.runner_label.clone()).or_default().add(s);
+            }
             for a in &u.actions {
-                if let Some(d) = a.duration_secs { dur.entry(a.action.clone()).or_default().add(d); }
+                if let Some(d) = a.duration_secs {
+                    dur.entry(a.action.clone()).or_default().add(d);
+                }
                 let e = fails.entry(a.action.clone()).or_default();
                 e.1 += 1;
-                if a.failed { e.0 += 1; }
+                if a.failed {
+                    e.0 += 1;
+                }
             }
         }
         for art in &run.artifacts {
-            size.entry(art.name.clone()).or_default().add(art.size_bytes as f64);
+            size.entry(art.name.clone())
+                .or_default()
+                .add(art.size_bytes as f64);
         }
     }
 
@@ -96,12 +108,17 @@ pub fn aggregate(runs: &[RunReport], pricing: &HashMap<String, f64>) -> Profile 
         action_durations: means(&dur),
         setup_times: means(&setup),
         queue_times: means(&queue),
-        artifact_sizes: size.iter().map(|(k, m)| (k.clone(), m.mean().round() as u64)).collect(),
-        failure_rates: fails.iter()
+        artifact_sizes: size
+            .iter()
+            .map(|(k, m)| (k.clone(), m.mean().round() as u64))
+            .collect(),
+        failure_rates: fails
+            .iter()
             .filter(|(_, (_, n))| *n > 0)
             .map(|(k, (f, n))| (k.clone(), *f as f64 / *n as f64))
             .collect(),
-        runner_costs: labels.iter()
+        runner_costs: labels
+            .iter()
             .filter_map(|l| pricing.get(l).map(|c| (l.clone(), *c)))
             .collect(),
         ..Profile::default()
@@ -109,10 +126,22 @@ pub fn aggregate(runs: &[RunReport], pricing: &HashMap<String, f64>) -> Profile 
 }
 
 #[derive(Default, Clone, Copy)]
-struct Mean { sum: f64, n: u32 }
+struct Mean {
+    sum: f64,
+    n: u32,
+}
 impl Mean {
-    fn add(&mut self, x: f64) { self.sum += x; self.n += 1; }
-    fn mean(&self) -> f64 { if self.n == 0 { 0.0 } else { self.sum / self.n as f64 } }
+    fn add(&mut self, x: f64) {
+        self.sum += x;
+        self.n += 1;
+    }
+    fn mean(&self) -> f64 {
+        if self.n == 0 {
+            0.0
+        } else {
+            self.sum / self.n as f64
+        }
+    }
 }
 
 fn means(m: &HashMap<String, Mean>) -> HashMap<String, f64> {
@@ -126,7 +155,9 @@ pub struct CollectorRegistry {
 
 impl CollectorRegistry {
     pub fn with_builtins() -> Self {
-        let mut r = CollectorRegistry { collectors: BTreeMap::new() };
+        let mut r = CollectorRegistry {
+            collectors: BTreeMap::new(),
+        };
         r.insert(Box::new(crate::backends::github::GithubCollector));
         r
     }
@@ -154,9 +185,16 @@ mod tests {
                 runner_label: label.into(),
                 queue_secs: Some(queue),
                 setup_secs: Some(setup),
-                actions: vec![ActionReport { action: action.into(), duration_secs: Some(dur), failed: false }],
+                actions: vec![ActionReport {
+                    action: action.into(),
+                    duration_secs: Some(dur),
+                    failed: false,
+                }],
             }],
-            artifacts: vec![ArtifactReport { name: format!("{action}/out"), size_bytes: 1000 }],
+            artifacts: vec![ArtifactReport {
+                name: format!("{action}/out"),
+                size_bytes: 1000,
+            }],
         }
     }
 
@@ -177,10 +215,23 @@ mod tests {
 
     #[test]
     fn failure_rate_is_failures_over_executions() {
-        let ok = ActionReport { action: "test".into(), duration_secs: Some(5.0), failed: false };
-        let bad = ActionReport { action: "test".into(), duration_secs: Some(5.0), failed: true };
+        let ok = ActionReport {
+            action: "test".into(),
+            duration_secs: Some(5.0),
+            failed: false,
+        };
+        let bad = ActionReport {
+            action: "test".into(),
+            duration_secs: Some(5.0),
+            failed: true,
+        };
         let mk = |a: ActionReport| RunReport {
-            units: vec![UnitReport { runner_label: "r".into(), queue_secs: None, setup_secs: None, actions: vec![a] }],
+            units: vec![UnitReport {
+                runner_label: "r".into(),
+                queue_secs: None,
+                setup_secs: None,
+                actions: vec![a],
+            }],
             artifacts: vec![],
         };
         let runs = vec![mk(ok.clone()), mk(ok), mk(bad.clone()), mk(bad)];
@@ -197,6 +248,9 @@ mod tests {
         ]);
         let p = aggregate(&runs, &pricing);
         assert!(p.runner_costs.contains_key("ubuntu-latest"));
-        assert!(!p.runner_costs.contains_key("macos-latest"), "unobserved label not priced");
+        assert!(
+            !p.runner_costs.contains_key("macos-latest"),
+            "unobserved label not priced"
+        );
     }
 }
