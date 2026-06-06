@@ -12,19 +12,43 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "frontends", "python"))
 
-from ariadne import action, shell, Inventory, scm, build, test, fmt, docs, coverage, impls
-from ariadne.artifacts import SourceTree, Binary, Wheel, TestReport, CoverageData, DocsSite, ProfileData
+from ariadne import (
+    action,
+    shell,
+    Inventory,
+    scm,
+    build,
+    test,
+    fmt,
+    docs,
+    coverage,
+    package,
+    impls,
+)
+from ariadne.artifacts import (
+    SourceTree,
+    Binary,
+    Wheel,
+    TestReport,
+    CoverageData,
+    DocsSite,
+    ProfileData,
+)
 
-LIFETIME = "1d"
-# Profiles persist longer than build artifacts so the next generation can fetch them.
-PROFILE_LIFETIME = "30d"
+# Keep every uploaded artifact short-lived (GitHub floors retention at 1 day).
+LIFETIME = "1h"
+PROFILE_LIFETIME = "1h"
 
 
-def write_workflow(pipeline, filename: str, backend: str = "github", level: int = 2, profile=None) -> None:
+def write_workflow(
+    pipeline, filename: str, backend: str = "github", level: int = 2, profile=None
+) -> None:
     """Compile a pipeline to a backend config and write it under .github/workflows/.
     `profile` (dict or JSON str) guides the cost model when planning."""
     yaml = pipeline.compile(backend=backend, level=level, profile=profile)
-    out = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", filename)
+    out = os.path.join(
+        os.path.dirname(__file__), "..", ".github", "workflows", filename
+    )
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         f.write(yaml)
@@ -77,15 +101,9 @@ def rust_coverage(src: SourceTree):
     return coverage.measure(out="lcov.info")
 
 
-def ariadne_build_and_test(src):
-    """Reusable: build the loom binary and run the Rust workspace tests."""
-    with impls(["cargo"]):
-        loom = build_loom(src)
-        test_workspace(src, loom)
-    return loom
-
-
-@action(outputs={"ext": Binary.file("target/release/libariadne_core.so", lifetime=LIFETIME)})
+@action(
+    outputs={"ext": Binary.file("target/release/libariadne_core.so", lifetime=LIFETIME)}
+)
 def build_core_ext(src: SourceTree):
     """Compile the PyO3 native extension (cdylib). Its compiled `.so` is the
     payload the wheel packages, so the wheel build depends on this artifact."""
@@ -101,6 +119,13 @@ def build_wheel(src: SourceTree, ext: Binary):
         release=True,
         out="dist",
     )
+
+
+@action(outputs={})
+def install_wheel(src: SourceTree, wheel: Wheel):
+    """Install the built wheel so the python checks can import the package. Only
+    effective in the same job as its consumers, which fusion colocates."""
+    return package.install("dist/*.whl", using="pip")
 
 
 @action(outputs={"report": TestReport.file("py-test-results.xml", lifetime=LIFETIME)})
@@ -125,19 +150,9 @@ def python_coverage(src: SourceTree, wheel: Wheel):
     )
 
 
-def python_build_and_test(src):
-    """Reusable: compile the native extension, package it into the ariadne wheel,
-    and run the Python frontend tests. One `impls` block binds cargo (the cdylib),
-    maturin (the wheel) and pytest (the tests); each applies where it has a
-    lowering. The `.so` flows from build_core_ext into build_wheel."""
-    with impls(["cargo", "maturin", "pytest"]):
-        ext = build_core_ext(src)
-        wheel = build_wheel(src, ext)
-        test_wheel(src, wheel)
-    return wheel
-
-
-@action(outputs={"profile": ProfileData.file("profile.json", lifetime=PROFILE_LIFETIME)})
+@action(
+    outputs={"profile": ProfileData.file("profile.json", lifetime=PROFILE_LIFETIME)}
+)
 def refresh_profile(src: SourceTree):
     """Close the profile-guided loop: aggregate recent main-branch runs into a
     fresh profile.json (durations, sizes, setup/queue, runner cost) and upload
