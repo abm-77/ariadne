@@ -5,7 +5,7 @@ use crate::backends::{
 use serde_json::json;
 
 pub fn catalogue() -> Catalogue {
-    Catalogue::new(vec![
+    Catalogue::from_items(vec![
         Instruction {
             id: InstructionId("local.checkout.git".into()),
             backend: BackendKind::Local,
@@ -59,6 +59,52 @@ pub fn catalogue() -> Catalogue {
             cost: CostHint { fixed: 0, per_mb: 0 },
             stability: Stability::Stable,
             implementation: json!({ "kind": "local.noop" }),
+            bind: Bindings::default(),
+        },
+        Instruction {
+            id: InstructionId("local.cache.restore".into()),
+            backend: BackendKind::Local,
+            provides: vec![Capability::new("cache.restore")],
+            requires: vec![Capability::new("process.exec")],
+            matcher: OpMatcher::for_op("RestoreCache"),
+            cost: CostHint { fixed: 1, per_mb: 0 },
+            stability: Stability::Stable,
+            implementation: json!({ "kind": "local.cache", "action": "restore" }),
+            bind: Bindings::default(),
+        },
+        Instruction {
+            id: InstructionId("local.cache.save".into()),
+            backend: BackendKind::Local,
+            provides: vec![Capability::new("cache.save")],
+            requires: vec![Capability::new("process.exec")],
+            matcher: OpMatcher::for_op("SaveCache"),
+            cost: CostHint { fixed: 1, per_mb: 0 },
+            stability: Stability::Stable,
+            implementation: json!({ "kind": "local.cache", "action": "save" }),
+            bind: Bindings::default(),
+        },
+        Instruction {
+            id: InstructionId("local.approval.gate".into()),
+            backend: BackendKind::Local,
+            provides: vec![Capability::new("approval.gate")],
+            requires: vec![Capability::new("process.exec")],
+            matcher: OpMatcher::for_op("RequestApproval"),
+            cost: CostHint { fixed: 0, per_mb: 0 },
+            stability: Stability::Stable,
+            implementation: json!({ "kind": "local.prompt" }),
+            bind: Bindings::default(),
+        },
+        // The local backend has no native steps; a Native op always runs its
+        // portable shell fallback.
+        Instruction {
+            id: InstructionId("local.native.fallback".into()),
+            backend: BackendKind::Local,
+            provides: vec![],
+            requires: vec![Capability::new("process.exec")],
+            matcher: OpMatcher::for_op("Native"),
+            cost: CostHint { fixed: 1, per_mb: 0 },
+            stability: Stability::Stable,
+            implementation: json!({ "kind": "local.native" }),
             bind: Bindings::default(),
         },
     ])

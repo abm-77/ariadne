@@ -32,8 +32,8 @@ impl<R: ContainerRuntime> Executor for LocalBackend<R> {
         let mut aborted = false;
 
         for (unit, bash_unit) in plan.units.iter().zip(&script.units) {
-            let fired = unit.effects_fired.clone();
-            let gated = unit.effects_gated.clone();
+            let fired = unit.consequences_fired.clone();
+            let gated = unit.consequences_gated.clone();
             let transfers = transfers_of(unit);
             let artifacts = produced_artifacts(unit);
 
@@ -83,8 +83,8 @@ impl<R: ContainerRuntime> Executor for LocalBackend<R> {
                 artifacts,
                 secrets_spoofed: spoofed,
                 secrets_withheld: withheld,
-                effects_fired: fired,
-                effects_gated: gated,
+                consequences_fired: fired,
+                consequences_gated: gated,
                 transfers,
             });
         }
@@ -104,8 +104,8 @@ fn resolve_secrets(unit: &ExecutionUnit) -> (Vec<String>, Vec<String>, Vec<(Stri
 
 fn skipped(
     unit: &ExecutionUnit,
-    fired: Vec<crate::planner::EffectInfo>,
-    gated: Vec<crate::planner::EffectInfo>,
+    fired: Vec<crate::planner::ConsequenceInfo>,
+    gated: Vec<crate::planner::ConsequenceInfo>,
     transfers: Vec<ArtifactTransfer>,
     artifacts: Vec<String>,
 ) -> UnitOutcome {
@@ -118,8 +118,8 @@ fn skipped(
         artifacts,
         secrets_spoofed: Vec::new(),
         secrets_withheld: unit.secrets.iter().map(|n| n.to_string()).collect(),
-        effects_fired: fired,
-        effects_gated: gated,
+        consequences_fired: fired,
+        consequences_gated: gated,
         transfers,
     }
 }
@@ -128,7 +128,7 @@ fn skipped(
 mod tests {
     use super::*;
     use crate::backends::local::runtime::{RunResult, RuntimeError};
-    use crate::ir::{ArtifactType, EffectKind, Workflow, WorkflowBuilder};
+    use crate::ir::{ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
     use crate::planner::{plan, plan_for, EventContext};
     use crate::testing::TransferKind;
     use std::sync::Mutex;
@@ -163,8 +163,8 @@ mod tests {
         b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         let build = b.shell_action("build", "build", &[src], &[bin], "cargo build --release");
         b.add_secrets(build, &["DEPLOY_TOKEN"]);
-        let deploy = b.effect("deploy", EffectKind::Deployment, false);
-        b.add_effect_to(build, deploy);
+        let deploy = b.consequence("deploy", ConsequenceKind::Deployment, false);
+        b.add_consequence_to(build, deploy);
         b.actor("local", &["ubuntu-latest"], &[]);
         b.build()
     }
@@ -219,7 +219,7 @@ mod tests {
         let run = backend.execute(&plan(&wf_secret_effect()).unwrap()).unwrap();
         assert_eq!(run.unit("build").unwrap().secrets_spoofed, vec!["DEPLOY_TOKEN".to_string()]);
         let specs = backend.runtime.specs.lock().unwrap();
-        let bs = specs.iter().find(|s| s.command.last().map_or(false, |c| c.contains("cargo build"))).unwrap();
+        let bs = specs.iter().find(|s| s.command.last().is_some_and(|c| c.contains("cargo build"))).unwrap();
         assert_eq!(bs.env.iter().find(|(k, _)| k == "DEPLOY_TOKEN").unwrap().1, "spoofed-DEPLOY_TOKEN");
     }
 
@@ -232,7 +232,7 @@ mod tests {
         assert!(build.secrets_spoofed.is_empty());
         assert_eq!(build.secrets_withheld, vec!["DEPLOY_TOKEN".to_string()]);
         let specs = backend.runtime.specs.lock().unwrap();
-        let bs = specs.iter().find(|s| s.command.last().map_or(false, |c| c.contains("cargo build"))).unwrap();
+        let bs = specs.iter().find(|s| s.command.last().is_some_and(|c| c.contains("cargo build"))).unwrap();
         assert!(bs.env.iter().all(|(k, _)| k != "DEPLOY_TOKEN"));
     }
 

@@ -1,13 +1,19 @@
 pub mod renderers;
 pub mod github;
 pub mod local;
+pub mod registry;
+pub mod external;
 
 use crate::diagnostics::Diagnostic;
-use crate::planner::{PhysicalOp, Plan, AccessMode};
+use crate::planner::{LogicalOp, Plan, AccessMode};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use ustr::Ustr;
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BackendKind {
@@ -17,18 +23,74 @@ pub enum BackendKind {
     Custom(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Capability(pub Ustr);
+// ---------------------------------------------------------------------------
+// Capability layers
+// ---------------------------------------------------------------------------
 
-impl Capability {
-    pub fn new(s: impl AsRef<str>) -> Self { Self(Ustr::from(s.as_ref())) }
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct WorkflowCapabilities: u32 {
+        const JOBS             = 1 << 0;
+        const DEPENDENCIES     = 1 << 1;
+        const CONDITIONS       = 1 << 2;
+        const MATRICES         = 1 << 3;
+        const PERMISSIONS      = 1 << 4;
+        const SECRETS          = 1 << 5;
+        const APPROVALS        = 1 << 6;
+        const RUNNER_SELECTION = 1 << 7;
+    }
 }
 
 bitflags::bitflags! {
-    /// High-level capabilities the optimizer reasons about (distinct from the
-    /// instruction-selection `Capability` strings). Decides which placement/runner
-    /// optimizations are *legal* for a backend; default is empty (none), which
-    /// forces the copy/upload-download fallback.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct ActorCapabilities: u32 {
+        const LINUX                = 1 << 0;
+        const WINDOWS              = 1 << 1;
+        const MACOS                = 1 << 2;
+        const ARM64                = 1 << 3;
+        const DOCKER               = 1 << 4;
+        const PODMAN               = 1 << 5;
+        const GPU                  = 1 << 6;
+        const PERSISTENT_WORKSPACE = 1 << 7;
+        const MOUNT_ACCESS         = 1 << 8;
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct PlacementCapabilities: u32 {
+        const COPY        = 1 << 0;
+        const STREAM      = 1 << 1;
+        const MOUNT_RO    = 1 << 2;
+        const MOUNT_RW    = 1 << 3;
+        const PERSISTENT  = 1 << 4;
+        const SAME_HOST   = 1 << 5;
+        const CROSS_HOST  = 1 << 6;
+    }
+}
+
+/// An execution resource class the backend can target.
+#[derive(Debug, Clone)]
+pub struct ActorClass {
+    pub id: String,
+    pub labels: Vec<String>,
+    pub capabilities: ActorCapabilities,
+}
+
+/// An artifact storage / access provider the backend supports.
+#[derive(Debug, Clone)]
+pub struct PlacementProvider {
+    pub id: String,
+    pub capabilities: PlacementCapabilities,
+}
+
+// ---------------------------------------------------------------------------
+// Optimizer capability profile (derived from actor + placement declarations)
+// ---------------------------------------------------------------------------
+
+bitflags::bitflags! {
+    /// High-level flags the optimizer reasons about. Derived from
+    /// `ActorClass` and `PlacementProvider` declarations; do not set by hand.
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     pub struct BackendCapabilities: u32 {
         const MOUNTS     = 1 << 0;
@@ -38,13 +100,85 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Stability {
-    Experimental,
-    Beta,
-    Stable,
-    Deprecated,
+/// Derive the optimizer profile from an Inventory embedded in Thread IR.
+/// Returns empty capabilities when no inventory is provided.
+pub fn derive_capability_profile_from_inventory(
+    inv: Option<&crate::ir::Inventory>,
+) -> BackendCapabilities {
+    let inv = match inv { Some(i) => i, None => return BackendCapabilities::empty() };
+    let actors = inv.actors.iter().map(|a| ActorClass {
+        id: a.id.to_string(),
+        labels: a.labels.iter().map(|s| s.to_string()).collect(),
+        capabilities: actor_caps_from_strings(&a.capabilities),
+    }).collect::<Vec<_>>();
+    let placements = inv.placements.iter().map(|p| PlacementProvider {
+        id: p.id.to_string(),
+        capabilities: placement_caps_from_strings(&p.access_modes),
+    }).collect::<Vec<_>>();
+    derive_capability_profile(&actors, &placements)
 }
+
+fn actor_caps_from_strings(v: &[ustr::Ustr]) -> ActorCapabilities {
+    let mut caps = ActorCapabilities::empty();
+    for s in v {
+        match s.as_str() {
+            "linux" => caps |= ActorCapabilities::LINUX,
+            "windows" => caps |= ActorCapabilities::WINDOWS,
+            "macos" => caps |= ActorCapabilities::MACOS,
+            "arm64" => caps |= ActorCapabilities::ARM64,
+            "docker" => caps |= ActorCapabilities::DOCKER,
+            "podman" => caps |= ActorCapabilities::PODMAN,
+            "gpu" => caps |= ActorCapabilities::GPU,
+            "persistent_workspace" => caps |= ActorCapabilities::PERSISTENT_WORKSPACE,
+            "cache_mount_access" | "mount" | "mount_access" => caps |= ActorCapabilities::MOUNT_ACCESS,
+            _ => {}
+        }
+    }
+    caps
+}
+
+fn placement_caps_from_strings(v: &[ustr::Ustr]) -> PlacementCapabilities {
+    let mut caps = PlacementCapabilities::empty();
+    for s in v {
+        match s.as_str() {
+            "copy" => caps |= PlacementCapabilities::COPY,
+            "stream" => caps |= PlacementCapabilities::STREAM,
+            "mount_ro" => caps |= PlacementCapabilities::MOUNT_RO,
+            "mount_rw" => caps |= PlacementCapabilities::MOUNT_RW,
+            "persistent" => caps |= PlacementCapabilities::PERSISTENT,
+            "same_host" | "same-host" => caps |= PlacementCapabilities::SAME_HOST,
+            "cross_host" | "cross-host" => caps |= PlacementCapabilities::CROSS_HOST,
+            _ => {}
+        }
+    }
+    caps
+}
+
+fn derive_capability_profile(
+    actors: &[ActorClass],
+    placements: &[PlacementProvider],
+) -> BackendCapabilities {
+    let mut caps = BackendCapabilities::empty();
+    if actors.iter().any(|a| a.capabilities.contains(ActorCapabilities::MOUNT_ACCESS)) {
+        caps |= BackendCapabilities::MOUNTS;
+    }
+    if placements.iter().any(|p| p.capabilities.contains(PlacementCapabilities::SAME_HOST)) {
+        caps |= BackendCapabilities::COLOCATION;
+    }
+    if placements.iter().any(|p| p.capabilities.contains(PlacementCapabilities::PERSISTENT)) {
+        caps |= BackendCapabilities::CACHE;
+    }
+    if placements.iter().any(|p| p.capabilities.contains(PlacementCapabilities::STREAM)) {
+        caps |= BackendCapabilities::STREAM;
+    }
+    caps
+}
+
+// ---------------------------------------------------------------------------
+// Instruction-selection layer
+// ---------------------------------------------------------------------------
+
+pub use crate::select::{Capability, Candidate, Stability};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostHint {
@@ -75,12 +209,15 @@ impl OpMatcher {
         Self { op: op.into(), extra: HashMap::new() }
     }
 
-    pub fn matches(&self, op: &PhysicalOp) -> bool {
+    pub fn matches(&self, op: &LogicalOp) -> bool {
         if op.name() != self.op.as_str() { return false; }
         for (key, val) in &self.extra {
             match (key.as_str(), op) {
-                ("access", PhysicalOp::TransferArtifact { access, .. }) => {
+                ("access", LogicalOp::TransferArtifact { access, .. }) => {
                     if transfer_access_name(access) != val.as_str() { return false; }
+                }
+                ("native_id", LogicalOp::Native { id, .. }) => {
+                    if id.as_str() != val.as_str() { return false; }
                 }
                 _ => return false,
             }
@@ -107,57 +244,15 @@ pub struct Instruction {
     pub bind: Bindings,
 }
 
-pub struct Catalogue {
-    entries: Vec<Instruction>,
-    index: InstructionIndex,
+impl Candidate for Instruction {
+    fn key(&self) -> &str { &self.matcher.op }
+    fn requires(&self) -> &[Capability] { &self.requires }
+    fn stability(&self) -> Stability { self.stability }
 }
 
-impl Catalogue {
-    pub fn new(entries: Vec<Instruction>) -> Self {
-        let index = InstructionIndex::build(&entries);
-        Self { entries, index }
-    }
-
-    pub fn entries(&self) -> &[Instruction] { &self.entries }
-    pub fn index(&self) -> &InstructionIndex { &self.index }
-}
-
-/// Precomputed lookup tables over a catalogue's entries. Each map stores
-/// indices into the entries slice, grouped by op name, backend, and provided
-/// capability, so the selector can skip a full scan.
-pub struct InstructionIndex {
-    by_op: HashMap<String, Vec<usize>>,
-    by_backend: HashMap<BackendKind, Vec<usize>>,
-    by_capability: HashMap<Capability, Vec<usize>>,
-}
-
-impl InstructionIndex {
-    fn build(entries: &[Instruction]) -> Self {
-        let mut by_op: HashMap<String, Vec<usize>> = HashMap::new();
-        let mut by_backend: HashMap<BackendKind, Vec<usize>> = HashMap::new();
-        let mut by_capability: HashMap<Capability, Vec<usize>> = HashMap::new();
-        for (i, instr) in entries.iter().enumerate() {
-            by_op.entry(instr.matcher.op.clone()).or_default().push(i);
-            by_backend.entry(instr.backend.clone()).or_default().push(i);
-            for cap in &instr.provides {
-                by_capability.entry(*cap).or_default().push(i);
-            }
-        }
-        Self { by_op, by_backend, by_capability }
-    }
-
-    pub fn by_op(&self, op_name: &str) -> &[usize] {
-        self.by_op.get(op_name).map_or(&[], Vec::as_slice)
-    }
-
-    pub fn by_backend(&self, backend: &BackendKind) -> &[usize] {
-        self.by_backend.get(backend).map_or(&[], Vec::as_slice)
-    }
-
-    pub fn by_capability(&self, cap: &Capability) -> &[usize] {
-        self.by_capability.get(cap).map_or(&[], Vec::as_slice)
-    }
-}
+/// The backend's instruction catalogue is just a `select::Registry` of
+/// `Instruction`s, keyed by the `LogicalOp` name each instruction matches.
+pub type Catalogue = crate::select::Registry<Instruction>;
 
 #[derive(Debug, Clone, Default)]
 pub struct Policy {
@@ -192,81 +287,185 @@ impl<'a> Selector<'a> {
 
     pub fn select(
         &self,
-        op: &PhysicalOp,
+        op: &LogicalOp,
         backend_caps: &[Capability],
         actor_caps: &[Capability],
     ) -> Option<SelectedInstruction<'_>> {
         let op_name = op.name();
 
         if let Some(pinned) = self.policy.instruction_pins.get(op_name)
-            && let Some(instr) = self.catalogue.entries.iter().find(|i| &i.id == pinned) {
+            && let Some(instr) = self.catalogue.all().iter().find(|i| &i.id == pinned) {
                 return Some(SelectedInstruction {
                     instruction: instr,
                     reason: format!("pinned by policy to {}", pinned.0),
                 });
             }
 
-        let mut candidates: Vec<&Instruction> = self.catalogue.index.by_op(op_name).iter()
-            .map(|&i| &self.catalogue.entries[i])
+        // Matching and policy exclusion are instruction-selection-specific and
+        // stay here; gathering by key, the hard-requirement filter, and the
+        // cost/stability ranking are the shared engine (`select`). Cost is this
+        // layer's priority.
+        let available: Vec<Capability> =
+            backend_caps.iter().chain(actor_caps.iter()).copied().collect();
+        let candidates = self.catalogue.candidates(op_name)
             .filter(|i| i.backend == self.backend)
             .filter(|i| i.matcher.matches(op))
-            .filter(|i| i.requires.iter().all(|req| {
-                backend_caps.iter().chain(actor_caps.iter()).any(|cap| cap == req)
-            }))
             .filter(|i| self.policy.allowed_instructions.as_ref()
-                .is_none_or(|allowed| allowed.contains(&i.id)))
-            .collect();
+                .is_none_or(|allowed| allowed.contains(&i.id)));
 
-        candidates.sort_by(|a, b| {
-            a.cost.fixed.cmp(&b.cost.fixed)
-                .then_with(|| stability_ord(a.stability).cmp(&stability_ord(b.stability)))
-        });
+        crate::select::resolve(candidates, &available, |i| i.cost.fixed)
+            .map(|instr| SelectedInstruction {
+                instruction: instr,
+                reason: format!("selected: cost={}, stability={:?}", instr.cost.fixed, instr.stability),
+            })
+    }
+}
 
-        candidates.first().map(|instr| SelectedInstruction {
-            instruction: instr,
-            reason: format!("selected: cost={}, stability={:?}", instr.cost.fixed, instr.stability),
+// ---------------------------------------------------------------------------
+// Serializable plan wire format (for external backends)
+// ---------------------------------------------------------------------------
+
+/// A serializable, backend-agnostic view of a Plan for the external backend protocol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendPlanRequest {
+    pub workflow_name: String,
+    pub units: Vec<BackendUnitRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendUnitRequest {
+    pub id: String,
+    pub runner: String,
+    pub needs: Vec<String>,
+    pub ops: Vec<JsonValue>,
+}
+
+pub fn plan_to_request(plan: &Plan) -> BackendPlanRequest {
+    BackendPlanRequest {
+        workflow_name: plan.workflow_name.to_string(),
+        units: plan.units.iter().map(|u| BackendUnitRequest {
+            id: u.id.to_string(),
+            runner: u.runner.to_string(),
+            needs: u.needs.iter().map(|n| n.to_string()).collect(),
+            ops: u.ops.iter().map(logical_op_to_json).collect(),
+        }).collect(),
+    }
+}
+
+fn logical_op_to_json(op: &LogicalOp) -> JsonValue {
+    match op {
+        LogicalOp::CheckoutRepo => json!({"kind": "CheckoutRepo"}),
+        LogicalOp::RunShell { label, script, env } => json!({
+            "kind": "RunShell",
+            "label": label.as_str(),
+            "script": script,
+            "env": env
+        }),
+        LogicalOp::UploadArtifact { name, path, lifetime } => json!({
+            "kind": "UploadArtifact",
+            "name": name.as_str(),
+            "path": path,
+            "lifetime": lifetime
+        }),
+        LogicalOp::DownloadArtifact { name, path } => json!({
+            "kind": "DownloadArtifact",
+            "name": name.as_str(),
+            "path": path
+        }),
+        LogicalOp::TransferArtifact { name, path, access } => json!({
+            "kind": "TransferArtifact",
+            "name": name.as_str(),
+            "path": path,
+            "access": transfer_access_name(access)
+        }),
+        LogicalOp::RestoreCache { key } => json!({"kind": "RestoreCache", "key": key.as_str()}),
+        LogicalOp::SaveCache { key } => json!({"kind": "SaveCache", "key": key.as_str()}),
+        LogicalOp::RequestApproval { reason } => json!({"kind": "RequestApproval", "reason": reason}),
+        LogicalOp::Native { id, args, fallback } => json!({
+            "kind": "Native",
+            "id": id.as_str(),
+            "args": args,
+            "fallback": fallback
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Object-safe trait for registry and CLI use
+// ---------------------------------------------------------------------------
+
+pub struct InstructionSummary {
+    pub id: String,
+    pub reason: String,
+}
+
+/// Object-safe backend interface. Used by `BackendRegistry` and the CLI.
+pub trait EmittingBackend: Send + Sync {
+    fn id(&self) -> &str;
+    fn backend_kind(&self) -> BackendKind;
+    /// Instruction-selection capabilities (for `Selector`).
+    fn capabilities(&self) -> Vec<Capability>;
+    fn workflow_capabilities(&self) -> WorkflowCapabilities;
+    fn catalogue(&self) -> &Catalogue;
+    fn emit(&self, plan: &Plan) -> Result<String, Vec<Diagnostic>>;
+    fn select_op(&self, op: &LogicalOp) -> Option<InstructionSummary>;
+}
+
+impl<B: Backend> EmittingBackend for B {
+    fn id(&self) -> &str { self.name() }
+    fn backend_kind(&self) -> BackendKind { Backend::backend_kind(self) }
+    fn capabilities(&self) -> Vec<Capability> { Backend::capabilities(self) }
+    fn workflow_capabilities(&self) -> WorkflowCapabilities { Backend::workflow_capabilities(self) }
+    fn catalogue(&self) -> &Catalogue { Backend::catalogue(self) }
+    fn emit(&self, plan: &Plan) -> Result<String, Vec<Diagnostic>> { Backend::emit(self, plan) }
+    fn select_op(&self, op: &LogicalOp) -> Option<InstructionSummary> {
+        let sel = Selector::for_backend(self);
+        let caps = Backend::capabilities(self);
+        sel.select(op, &caps, &[]).map(|s| InstructionSummary {
+            id: s.instruction.id.0.to_string(),
+            reason: s.reason,
         })
     }
 }
 
+// ---------------------------------------------------------------------------
+// Generic Backend trait (type-safe, not object-safe)
+// ---------------------------------------------------------------------------
+
 pub use renderers::Renderer;
 
-/// A backend turns a `Plan` into backend-specific output. The contract is
-/// codified: `lower` selects instructions and builds the backend IR, `render`
-/// turns that IR into text via a `Renderer`, and `emit` is their composition.
 pub trait Backend: Send + Sync {
-    /// The backend's structured intermediate representation (e.g. a workflow
-    /// YAML model or a bash-script model).
     type Ir;
-    /// Backend-specific options (e.g. push branches, default image). Populated
-    /// by the frontend/CLI; the engine only needs them to be `Default`.
     type Options: Default;
 
     fn name(&self) -> &str;
     fn backend_kind(&self) -> BackendKind;
+    /// Instruction-selection capabilities (e.g. "github.action_calls.uses").
     fn capabilities(&self) -> Vec<Capability>;
     fn catalogue(&self) -> &Catalogue;
     fn options(&self) -> &Self::Options;
 
-    /// High-level capabilities the optimizer uses for legality (mounts, etc.).
-    /// Conservative by default — backends opt in to richer placement.
-    fn capability_profile(&self) -> BackendCapabilities { BackendCapabilities::default() }
+    fn workflow_capabilities(&self) -> WorkflowCapabilities {
+        WorkflowCapabilities::JOBS
+            | WorkflowCapabilities::DEPENDENCIES
+            | WorkflowCapabilities::SECRETS
+    }
 
-    /// Lower a plan into the backend IR: instruction selection + structure.
     fn lower(&self, plan: &Plan) -> Self::Ir;
-    /// Render the backend IR to text. Implemented via a `Renderer`.
     fn render(&self, ir: &Self::Ir) -> String;
 
-    /// Produce final backend output. Always `render ∘ lower`.
     fn emit(&self, plan: &Plan) -> Result<String, Vec<Diagnostic>> {
         Ok(self.render(&self.lower(plan)))
     }
 
-    /// A `Selector` over this backend's catalogue (instruction selection helper).
     fn selector(&self) -> Selector<'_> where Self: Sized {
         Selector::for_backend(self)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 fn transfer_access_name(access: &AccessMode) -> &'static str {
     match access {
@@ -276,15 +475,6 @@ fn transfer_access_name(access: &AccessMode) -> &'static str {
         AccessMode::Stream => "Stream",
         AccessMode::SameHostPath => "SameHostPath",
         AccessMode::OciLayer => "OciLayer",
-    }
-}
-
-fn stability_ord(s: Stability) -> u8 {
-    match s {
-        Stability::Stable => 0,
-        Stability::Beta => 1,
-        Stability::Experimental => 2,
-        Stability::Deprecated => 3,
     }
 }
 
@@ -309,108 +499,159 @@ mod tests {
 
     #[test]
     fn selects_matching_instruction() {
-        let cat = Catalogue::new(vec![
+        let cat = Catalogue::from_items(vec![
             make_instr("github.checkout", "CheckoutRepo", BackendKind::Github,
-                vec![Capability::new("github.actions.uses")], 5),
+                vec![Capability::new("github.action_calls.uses")], 5),
         ]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        let caps = vec![Capability::new("github.actions.uses")];
-        let result = sel.select(&PhysicalOp::CheckoutRepo, &caps, &[]);
+        let caps = vec![Capability::new("github.action_calls.uses")];
+        let result = sel.select(&LogicalOp::CheckoutRepo, &caps, &[]);
         assert!(result.is_some());
         assert_eq!(result.unwrap().instruction.id.0, "github.checkout");
     }
 
     #[test]
     fn filters_by_missing_capability() {
-        let cat = Catalogue::new(vec![
+        let cat = Catalogue::from_items(vec![
             make_instr("github.checkout", "CheckoutRepo", BackendKind::Github,
-                vec![Capability::new("github.actions.uses")], 5),
+                vec![Capability::new("github.action_calls.uses")], 5),
         ]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        assert!(sel.select(&PhysicalOp::CheckoutRepo, &[], &[]).is_none());
+        assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
     }
 
     #[test]
     fn filters_by_backend_kind() {
-        let cat = Catalogue::new(vec![
+        let cat = Catalogue::from_items(vec![
             make_instr("local.checkout", "CheckoutRepo", BackendKind::Local, vec![], 3),
         ]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        assert!(sel.select(&PhysicalOp::CheckoutRepo, &[], &[]).is_none());
+        assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
     }
 
     #[test]
     fn policy_pin_overrides_ranking() {
-        let cat = Catalogue::new(vec![
+        let cat = Catalogue::from_items(vec![
             make_instr("a", "CheckoutRepo", BackendKind::Github, vec![], 5),
             make_instr("b", "CheckoutRepo", BackendKind::Github, vec![], 1),
         ]);
         let mut policy = Policy::default();
         policy.instruction_pins.insert("CheckoutRepo".into(), InstructionId("a".into()));
         let sel = Selector::new(&cat, policy, BackendKind::Github);
-        assert_eq!(sel.select(&PhysicalOp::CheckoutRepo, &[], &[]).unwrap().instruction.id.0, "a");
+        assert_eq!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).unwrap().instruction.id.0, "a");
     }
 
     #[test]
     fn ranks_by_cost_ascending() {
-        let cat = Catalogue::new(vec![
+        let cat = Catalogue::from_items(vec![
             make_instr("expensive", "RunShell", BackendKind::Github, vec![], 10),
             make_instr("cheap", "RunShell", BackendKind::Github, vec![], 1),
         ]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        let op = PhysicalOp::RunShell { label: "x".into(), script: "echo hi".into(), env: Default::default() };
+        let op = LogicalOp::RunShell { label: "x".into(), script: "echo hi".into(), env: Default::default() };
         assert_eq!(sel.select(&op, &[], &[]).unwrap().instruction.id.0, "cheap");
     }
 
     #[test]
     fn allowlist_rejects_unlisted_instruction() {
-        let cat = Catalogue::new(vec![
+        let cat = Catalogue::from_items(vec![
             make_instr("github.checkout", "CheckoutRepo", BackendKind::Github, vec![], 5),
         ]);
-        let mut policy = Policy::default();
-        policy.allowed_instructions = Some(HashSet::new());
+        let policy = Policy { allowed_instructions: Some(HashSet::new()), ..Default::default() };
         let sel = Selector::new(&cat, policy, BackendKind::Github);
-        assert!(sel.select(&PhysicalOp::CheckoutRepo, &[], &[]).is_none());
+        assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
     }
 
     #[test]
-    fn index_groups_by_op_backend_and_capability() {
-        let cat = Catalogue::new(vec![
+    fn catalogue_indexes_instructions_by_op() {
+        let cat = Catalogue::from_items(vec![
             make_instr("a", "RunShell", BackendKind::Github, vec![], 1),
             make_instr("b", "RunShell", BackendKind::Local, vec![], 1),
             make_instr("c", "CheckoutRepo", BackendKind::Github, vec![], 1),
         ]);
-        let idx = cat.index();
-        assert_eq!(idx.by_op("RunShell").len(), 2);
-        assert_eq!(idx.by_op("CheckoutRepo").len(), 1);
-        assert_eq!(idx.by_backend(&BackendKind::Github).len(), 2);
-        assert_eq!(idx.by_backend(&BackendKind::Local).len(), 1);
-    }
-
-    #[test]
-    fn index_by_capability_finds_providers() {
-        let mut p = make_instr("p", "RunShell", BackendKind::Github, vec![], 1);
-        p.provides = vec![Capability::new("artifact.upload")];
-        let cat = Catalogue::new(vec![p]);
-        let providers = cat.index().by_capability(&Capability::new("artifact.upload"));
-        assert_eq!(providers, &[0]);
-        assert!(cat.index().by_capability(&Capability::new("nonexistent")).is_empty());
-    }
-
-    #[test]
-    fn index_returns_empty_slice_for_unknown_keys() {
-        let cat = Catalogue::new(vec![]);
-        assert!(cat.index().by_op("RunShell").is_empty());
-        assert!(cat.index().by_backend(&BackendKind::Github).is_empty());
+        assert_eq!(cat.candidates("RunShell").count(), 2);
+        assert_eq!(cat.candidates("CheckoutRepo").count(), 1);
+        assert_eq!(cat.candidates("Nope").count(), 0);
+        assert_eq!(cat.all().len(), 3);
     }
 
     #[test]
     fn op_matcher_extra_predicate_access() {
         let mut matcher = OpMatcher::for_op("TransferArtifact");
         matcher.extra.insert("access".into(), "Copy".into());
-        let copy_op = PhysicalOp::TransferArtifact { name: "x".into(), path: None, access: AccessMode::Copy };
-        let mount_op = PhysicalOp::TransferArtifact { name: "x".into(), path: None, access: AccessMode::MountReadOnly };
+        let copy_op = LogicalOp::TransferArtifact { name: "x".into(), path: None, access: AccessMode::Copy };
+        let mount_op = LogicalOp::TransferArtifact { name: "x".into(), path: None, access: AccessMode::MountReadOnly };
         assert!(matcher.matches(&copy_op));
         assert!(!matcher.matches(&mount_op));
+    }
+
+    #[test]
+    fn derive_capability_profile_from_actors_and_placements() {
+        use crate::ir::{Actor, Inventory, InventoryPlacement};
+        let inv = Inventory {
+            id: "test".into(),
+            actors: vec![Actor {
+                id: "local".into(),
+                labels: vec!["ubuntu".into()],
+                capabilities: vec!["linux".into(), "cache_mount_access".into()],
+                resources: None,
+            }],
+            placements: vec![InventoryPlacement {
+                id: "workspace".into(),
+                kind: "volume".into(),
+                access_modes: vec!["same_host".into(), "mount_rw".into()],
+                accessible_by: vec![],
+            }],
+            implementations: vec![],
+        };
+        let profile = derive_capability_profile_from_inventory(Some(&inv));
+        assert!(profile.contains(BackendCapabilities::MOUNTS));
+        assert!(profile.contains(BackendCapabilities::COLOCATION));
+        assert!(!profile.contains(BackendCapabilities::CACHE));
+    }
+
+    #[test]
+    fn derive_capability_profile_cache_from_persistent_placement() {
+        use crate::ir::{Inventory, InventoryPlacement};
+        let inv = Inventory {
+            id: "test".into(),
+            actors: vec![],
+            placements: vec![InventoryPlacement {
+                id: "cache".into(),
+                kind: "cache".into(),
+                access_modes: vec!["persistent".into(), "cross_host".into()],
+                accessible_by: vec![],
+            }],
+            implementations: vec![],
+        };
+        let profile = derive_capability_profile_from_inventory(Some(&inv));
+        assert!(profile.contains(BackendCapabilities::CACHE));
+        assert!(!profile.contains(BackendCapabilities::MOUNTS));
+    }
+
+    #[test]
+    fn derive_capability_profile_empty_without_inventory() {
+        let profile = derive_capability_profile_from_inventory(None);
+        assert_eq!(profile, BackendCapabilities::empty());
+    }
+
+    #[test]
+    fn plan_to_request_serializes_all_ops() {
+        use crate::ir::{ArtifactType, WorkflowBuilder};
+        use crate::planner::plan;
+        let mut b = WorkflowBuilder::new("test");
+        let src = b.artifact("src", ArtifactType::SourceTree);
+        let bin = b.artifact("bin", ArtifactType::Binary);
+        b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
+        b.shell_action("build", "build", &[src], &[bin], "cargo build");
+        b.actor("r", &["ubuntu-latest"], &[]);
+        let p = plan(&b.build()).unwrap();
+        let req = plan_to_request(&p);
+        assert_eq!(req.workflow_name, "test");
+        assert_eq!(req.units.len(), 2);
+        let build_unit = req.units.iter().find(|u| u.id == "build").unwrap();
+        assert!(build_unit.ops.iter().any(|op| op["kind"] == "DownloadArtifact"));
+        assert!(build_unit.ops.iter().any(|op| op["kind"] == "RunShell"));
+        assert!(build_unit.ops.iter().any(|op| op["kind"] == "UploadArtifact"));
     }
 }

@@ -3,7 +3,7 @@ mod instructions;
 pub mod runtime;
 
 use crate::backends::{Backend, BackendKind, Capability, Catalogue, Instruction, Renderer};
-use crate::planner::{PhysicalOp, Plan};
+use crate::planner::{LogicalOp, Plan};
 pub use crate::backends::renderers::{BashRenderer, BashScript, BashUnit};
 pub use runtime::{ContainerRuntime, ContainerSpec, DockerRuntime, Mount, PodmanRuntime, RunResult, RuntimeError};
 
@@ -62,11 +62,9 @@ impl<R: ContainerRuntime> Backend for LocalBackend<R> {
     fn catalogue(&self) -> &Catalogue { &self.catalogue }
     fn options(&self) -> &LocalOptions { &self.opts }
 
-    fn capability_profile(&self) -> crate::backends::BackendCapabilities {
-        // Local containers share a workspace/volume, so mounts + colocation are
-        // available; no GitHub-style artifact cache.
-        use crate::backends::BackendCapabilities as C;
-        C::MOUNTS | C::COLOCATION
+    fn workflow_capabilities(&self) -> crate::backends::WorkflowCapabilities {
+        use crate::backends::WorkflowCapabilities as WC;
+        WC::JOBS | WC::DEPENDENCIES | WC::SECRETS | WC::APPROVALS
     }
 
     fn lower(&self, plan: &Plan) -> BashScript {
@@ -90,12 +88,12 @@ impl<R: ContainerRuntime> Backend for LocalBackend<R> {
     }
 }
 
-pub(crate) fn lower_op(op: &PhysicalOp, instr: &Instruction) -> Vec<String> {
+pub(crate) fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<String> {
     let kind = instr.implementation.get("kind").and_then(|v| v.as_str()).unwrap_or("");
     match kind {
         "process.exec" => match op {
-            PhysicalOp::RunShell { script, .. } => vec![script.clone()],
-            PhysicalOp::CheckoutRepo => {
+            LogicalOp::RunShell { script, .. } => vec![script.clone()],
+            LogicalOp::CheckoutRepo => {
                 let argv: Vec<&str> = instr.implementation.get("argv")
                     .and_then(|v| v.as_array())
                     .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
@@ -109,14 +107,40 @@ pub(crate) fn lower_op(op: &PhysicalOp, instr: &Instruction) -> Vec<String> {
             // is absent (build didn't produce it), drop a placeholder so the
             // transfer is still observable. Writes only to the store, never the
             // workspace.
-            PhysicalOp::UploadArtifact { name, path: Some(p) } => vec![format!(
+            LogicalOp::UploadArtifact { name, path: Some(p), .. } => vec![format!(
                 "mkdir -p \"$LOOM_ARTIFACT_STORE/{name}\"; \
                  cp -r \"{p}\" \"$LOOM_ARTIFACT_STORE/{name}/\" 2>/dev/null \
                  || echo \"mock:{name}\" > \"$LOOM_ARTIFACT_STORE/{name}/.mock\""
             )],
             _ => vec![],
         },
+        "local.cache" => {
+            let action = instr.implementation.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            match (action, op) {
+                ("restore", LogicalOp::RestoreCache { key }) => vec![format!(
+                    "if [ -f \"$LOOM_CACHE_STORE/{key}.tar\" ]; then \
+                     tar -xf \"$LOOM_CACHE_STORE/{key}.tar\" -C .; \
+                     fi"
+                )],
+                ("save", LogicalOp::SaveCache { key }) => vec![format!(
+                    "mkdir -p \"$LOOM_CACHE_STORE\"; \
+                     tar -cf \"$LOOM_CACHE_STORE/{key}.tar\" .cache/{key} 2>/dev/null || true"
+                )],
+                _ => vec![],
+            }
+        }
+        "local.prompt" => match op {
+            LogicalOp::RequestApproval { reason } => vec![
+                format!("read -r -p 'Approval required: {reason} [y/N] ' _loom_approval"),
+                r#"[ "$_loom_approval" = "y" ] || { echo "Approval denied"; exit 1; }"#.into(),
+            ],
+            _ => vec![],
+        },
         "local.noop" => vec![],
+        "local.native" => match op {
+            LogicalOp::Native { fallback, .. } => vec![fallback.clone()],
+            _ => vec![],
+        },
         _ => vec![],
     }
 }
@@ -163,8 +187,8 @@ mod tests {
         let backend = LocalBackend::podman();
         let sel = Selector::for_backend(&backend);
         let caps = instructions::capabilities();
-        assert!(sel.select(&PhysicalOp::CheckoutRepo, &caps, &[]).is_some());
-        let run = PhysicalOp::RunShell { label: "x".into(), script: "echo hi".into(), env: Default::default() };
+        assert!(sel.select(&LogicalOp::CheckoutRepo, &caps, &[]).is_some());
+        let run = LogicalOp::RunShell { label: "x".into(), script: "echo hi".into(), env: Default::default() };
         assert!(sel.select(&run, &caps, &[]).is_some());
     }
 
@@ -182,5 +206,54 @@ mod tests {
         };
         let out = BashRenderer.render(&script);
         assert!(out.contains("# build\ncargo build"));
+    }
+
+    #[test]
+    fn catalogue_has_cache_and_approval_instructions() {
+        let cat = instructions::catalogue();
+        let ids: Vec<_> = cat.all().iter().map(|i| i.id.0.as_str()).collect();
+        assert!(ids.contains(&"local.cache.restore"));
+        assert!(ids.contains(&"local.cache.save"));
+        assert!(ids.contains(&"local.approval.gate"));
+    }
+
+    #[test]
+    fn cache_restore_emits_conditional_tar_extract() {
+        let backend = LocalBackend::podman();
+        let sel = Selector::for_backend(&backend);
+        let caps = instructions::capabilities();
+        let op = LogicalOp::RestoreCache { key: "cargo".into() };
+        let selected = sel.select(&op, &caps, &[]).unwrap();
+        let lines = lower_op(&op, selected.instruction);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("tar -xf"));
+        assert!(lines[0].contains("cargo.tar"));
+    }
+
+    #[test]
+    fn cache_save_emits_tar_create() {
+        let backend = LocalBackend::podman();
+        let sel = Selector::for_backend(&backend);
+        let caps = instructions::capabilities();
+        let op = LogicalOp::SaveCache { key: "cargo".into() };
+        let selected = sel.select(&op, &caps, &[]).unwrap();
+        let lines = lower_op(&op, selected.instruction);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("tar -cf"));
+        assert!(lines[0].contains("cargo.tar"));
+    }
+
+    #[test]
+    fn approval_gate_emits_read_prompt_and_guard() {
+        let backend = LocalBackend::podman();
+        let sel = Selector::for_backend(&backend);
+        let caps = instructions::capabilities();
+        let op = LogicalOp::RequestApproval { reason: "deploy to prod".into() };
+        let selected = sel.select(&op, &caps, &[]).unwrap();
+        let lines = lower_op(&op, selected.instruction);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("read"));
+        assert!(lines[0].contains("deploy to prod"));
+        assert!(lines[1].contains("exit 1"));
     }
 }
