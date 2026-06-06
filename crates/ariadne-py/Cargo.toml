@@ -1,7 +1,10 @@
 [package]
 name = "ariadne-py"
 version.workspace = true
-edition.workspace = true
+# Edition 2021 (not the workspace's 2024): pyo3 0.22's proc-macros generate
+# unsafe calls that edition 2024 flags as future-incompat warnings. The bindings
+# need no 2024 features, so pinning 2021 keeps this crate warning-clean.
+edition = "2021"
 
 [lib]
 name = "ariadne_core"

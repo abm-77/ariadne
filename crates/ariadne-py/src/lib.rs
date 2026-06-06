@@ -1,5 +1,9 @@
+// pyo3's #[pymethods] expansion emits `.into()` on already-`PyErr` values;
+// the lint fires on macro-generated code we don't control.
+#![allow(clippy::useless_conversion)]
+
 use ariadne::{Pipeline as RsPipeline, ir::Workflow};
-use ariadne::backends::{BackendCapabilities, Backend};
+use ariadne::backends::EmittingBackend;
 use ariadne::backends::github::GithubActionsBackend;
 use ariadne::backends::local::LocalBackend;
 use ariadne::optimize::{optimize, OptLevel, OptimizeCtx};
@@ -12,16 +16,18 @@ fn parse_workflow(json: &str) -> PyResult<Workflow> {
     serde_json::from_str(json).map_err(|e| PyValueError::new_err(format!("invalid TIR JSON: {e}")))
 }
 
-fn diags_to_strings(diags: &[ariadne::diagnostics::Diagnostic]) -> Vec<String> {
-    diags.iter().map(|d| d.to_string()).collect()
+/// Parse optional profile JSON into a `Profile`; absent input is the empty
+/// profile (the cost model then falls back to constants).
+fn parse_profile(json: Option<&str>) -> PyResult<Profile> {
+    match json {
+        Some(s) => serde_json::from_str(s)
+            .map_err(|e| PyValueError::new_err(format!("invalid profile JSON: {e}"))),
+        None => Ok(Profile::default()),
+    }
 }
 
-fn backend_caps(backend: &str) -> PyResult<BackendCapabilities> {
-    match backend {
-        "github" => Ok(GithubActionsBackend::default().capability_profile()),
-        "local" => Ok(LocalBackend::podman().capability_profile()),
-        other => Err(PyValueError::new_err(format!("unknown backend '{other}'; supported: github, local"))),
-    }
+fn diags_to_strings(diags: &[ariadne::diagnostics::Diagnostic]) -> Vec<String> {
+    diags.iter().map(|d| d.to_string()).collect()
 }
 
 /// An opaque handle to a compiled execution plan. Produced by Pipeline.plan()
@@ -88,11 +94,17 @@ impl Pipeline {
     }
 
     /// Optimize a plan for the given backend and optimization level (0-3).
-    /// Returns a new Plan with optimization decisions applied.
-    #[pyo3(signature = (plan, backend="local", level=2))]
-    fn optimize(&self, plan: &Plan, backend: &str, level: u8) -> PyResult<Plan> {
-        let caps = backend_caps(backend)?;
-        let prof = Profile::default();
+    /// `profile` is optional profile JSON (runner costs, durations, artifact
+    /// sizes) that guides the cost model. Returns a new Plan with decisions.
+    #[pyo3(signature = (plan, backend="local", level=2, profile=None))]
+    fn optimize(&self, plan: &Plan, backend: &str, level: u8, profile: Option<&str>) -> PyResult<Plan> {
+        if backend != "github" && backend != "local" {
+            return Err(PyValueError::new_err(format!("unknown backend '{backend}'; supported: github, local")));
+        }
+        let caps = ariadne::backends::derive_capability_profile_from_inventory(
+            self.workflow.inventory.as_ref()
+        );
+        let prof = parse_profile(profile)?;
         let wf = &self.workflow;
         let analysis = Analysis::of(wf);
         let ctx = OptimizeCtx {
@@ -122,8 +134,8 @@ impl Pipeline {
     }
 
     /// Convenience: validate + plan + optimize + emit in one call.
-    #[pyo3(signature = (backend="local", level=2))]
-    fn compile(&self, backend: &str, level: u8) -> PyResult<String> {
+    #[pyo3(signature = (backend="local", level=2, profile=None))]
+    fn compile(&self, backend: &str, level: u8, profile: Option<&str>) -> PyResult<String> {
         if self.has_errors() {
             let errs = self.validate().into_iter()
                 .filter(|s| s.starts_with("error:"))
@@ -132,8 +144,65 @@ impl Pipeline {
             return Err(PyValueError::new_err(format!("workflow has errors:\n{errs}")));
         }
         let plan = self.plan()?;
-        let plan = self.optimize(&plan, backend, level)?;
+        let plan = self.optimize(&plan, backend, level, profile)?;
         self.emit(&plan, backend)
+    }
+
+    /// Run a loom test suite (JSON) against this workflow. Each case is planned
+    /// for its event, optimized, and its plan-level assertions are evaluated.
+    /// Returns (case, assertion, status, detail) rows where status is
+    /// "pass" | "fail" | "skip" ("skip" = execution-level, run via `loom test`).
+    #[pyo3(signature = (suite_json, backend="github", level=2, profile=None))]
+    fn run_tests(&self, suite_json: &str, backend: &str, level: u8, profile: Option<&str>)
+        -> PyResult<Vec<(String, String, String, String)>>
+    {
+        use ariadne::testing::{check_plan, TestSuite};
+        use ariadne::planner::plan_for;
+        use ariadne::backends::derive_capability_profile_from_inventory;
+
+        let suite: TestSuite = serde_json::from_str(suite_json)
+            .map_err(|e| PyValueError::new_err(format!("invalid test suite JSON: {e}")))?;
+        let wf = &self.workflow;
+        let caps = derive_capability_profile_from_inventory(wf.inventory.as_ref());
+        let prof = parse_profile(profile)?;
+        let analysis = Analysis::of(wf);
+
+        let mut out = Vec::new();
+        for case in &suite.cases {
+            let backend_id = case.backend.as_deref().unwrap_or(backend);
+            let plan = plan_for(wf, &case.event)
+                .map_err(|errs| PyValueError::new_err(diags_to_strings(&errs).join("\n")))?;
+            let ctx = OptimizeCtx {
+                workflow: wf,
+                profile: &prof,
+                backend_caps: caps,
+                policy: &wf.policies,
+                analysis: &analysis,
+                objectives: wf.policies.objectives.clone(),
+                level: OptLevel::from_u8(level),
+            };
+            let plan = optimize(plan, &ctx);
+            let results = match backend_id {
+                "github" => check_plan(&plan, &GithubActionsBackend::default(), &case.assertions),
+                "local" => check_plan(&plan, &LocalBackend::podman(), &case.assertions),
+                other => return Err(PyValueError::new_err(format!("unknown backend '{other}'"))),
+            };
+            for r in &results {
+                let status = if r.passed { "pass" } else { "fail" };
+                out.push((case.name.clone(), format!("{:?}", r.assertion), status.into(), r.detail.clone()));
+            }
+            // Execution-level assertions can't be decided from the plan; surface
+            // them as skipped so they are visible but don't fail the suite.
+            for a in case.assertions.iter().filter(|a| a.requires_execution()) {
+                out.push((
+                    case.name.clone(),
+                    format!("{a:?}"),
+                    "skip".into(),
+                    "execution-level assertion; run via `loom test`".into(),
+                ));
+            }
+        }
+        Ok(out)
     }
 }
 
