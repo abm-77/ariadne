@@ -18,7 +18,7 @@ from _lib import (
     python_fmt, python_docs, python_coverage,
     refresh_profile,
 )
-from ariadne import workflow, Pipeline, on, impls
+from ariadne import workflow, Pipeline, on, impls, install_dependencies
 from ariadne.testing import test_case, expect
 
 PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "profile.json")
@@ -35,6 +35,9 @@ def load_profile():
 
 @workflow(inventory=inventory(), triggers=[on.push(branches=["main"])])
 def main_ci():
+    # The bare runner doesn't ship maturin/pdoc/cargo-llvm-cov/etc., so install
+    # each job's declared tool dependencies on start.
+    install_dependencies()
     src = checkout()
 
     with impls(["cargo"]):
