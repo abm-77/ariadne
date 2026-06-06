@@ -175,6 +175,61 @@ fn unit_environment(ops: &[LogicalOp]) -> Option<String> {
     })
 }
 
+/// Native setup steps for the unit's toolchains (e.g. actions/setup-python),
+/// using the version/channel declared in the inventory. Empty unless the
+/// workflow opts into provisioning its environment.
+fn setup_steps(plan: &Plan, unit: &crate::planner::ExecutionUnit) -> Vec<GhStep> {
+    if !plan.install_dependencies {
+        return Vec::new();
+    }
+    unit.toolchains.iter().filter_map(|tc| {
+        let version = plan.toolchains.get(tc.as_str()).cloned().flatten();
+        match tc.as_str() {
+            "python" => Some(setup_uses("Set up Python", "actions/setup-python@v5",
+                "python-version", version.unwrap_or_else(|| "3.x".into()))),
+            "node" => Some(setup_uses("Set up Node", "actions/setup-node@v4",
+                "node-version", version.unwrap_or_else(|| "lts/*".into()))),
+            "go" => Some(setup_uses("Set up Go", "actions/setup-go@v5",
+                "go-version", version.unwrap_or_else(|| "stable".into()))),
+            // dtolnay/rust-toolchain selects the channel via the action ref.
+            "rust" => Some(GhStep {
+                name: "Set up Rust".into(),
+                uses: Some(format!("dtolnay/rust-toolchain@{}", version.unwrap_or_else(|| "stable".into()))),
+                ..Default::default()
+            }),
+            _ => None,
+        }
+    }).collect()
+}
+
+fn setup_uses(name: &str, uses: &str, key: &str, value: String) -> GhStep {
+    let mut with = IndexMap::new();
+    with.insert(key.to_string(), value);
+    GhStep { name: name.into(), uses: Some(uses.into()), with: Some(with), ..Default::default() }
+}
+
+/// A single "Install dependencies" step that runs the install command for each
+/// of the unit's declared tools (already lowered to a manager command in the
+/// plan's shared table), or None when install-on-start is off. Commands are
+/// de-duplicated, since several tools can share one.
+fn install_step(plan: &Plan, unit: &crate::planner::ExecutionUnit) -> Option<GhStep> {
+    if !plan.install_dependencies || unit.dependencies.is_empty() {
+        return None;
+    }
+    let mut cmds: Vec<String> = Vec::new();
+    for tool in &unit.dependencies {
+        if let Some(cmd) = plan.dependencies.get(tool.as_str())
+            && !cmds.contains(cmd)
+        {
+            cmds.push(cmd.clone());
+        }
+    }
+    if cmds.is_empty() {
+        return None;
+    }
+    Some(GhStep { name: "Install dependencies".into(), run: Some(cmds.join("\n")), ..Default::default() })
+}
+
 /// Map a semantic artifact lifetime to GitHub `retention-days`. GitHub's
 /// retention is coarse: whole days, minimum 1, maximum 90. A sub-day requirement
 /// (e.g. "12h", "30m") rounds UP to 1 day, the finest GitHub can express, which
@@ -238,13 +293,26 @@ fn plan_to_gha(plan: &Plan, opts: &EmitOptions, selector: &Selector, backend_cap
     let on = build_on(&plan.triggers, opts);
 
     let jobs = plan.units.iter().map(|unit| {
-        let steps: Vec<GhStep> = unit.ops.iter()
+        let mut steps: Vec<GhStep> = unit.ops.iter()
             .flat_map(|op| {
                 selector.select(op, backend_caps, &[])
                     .map(|sel| lower_op(op, sel.instruction))
                     .unwrap_or_default()
             })
             .collect();
+
+        // Optionally provision the unit's toolchains and install its declared
+        // tools on job start (after checkout). Without this opt-in the
+        // environment is assumed to provide them. Toolchain setup precedes
+        // tool install (e.g. set up Python before `pip install`).
+        let after = steps.iter()
+            .position(|s| s.uses.as_deref().is_some_and(|u| u.contains("checkout")))
+            .map_or(0, |i| i + 1);
+        let mut prelude = setup_steps(plan, unit);
+        prelude.extend(install_step(plan, unit));
+        for (offset, step) in prelude.into_iter().enumerate() {
+            steps.insert(after + offset, step);
+        }
 
         (unit.id.to_string(), GhJob {
             runs_on: unit.runner.to_string(),
