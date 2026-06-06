@@ -1,10 +1,10 @@
 //! Fusion: collapse a producer into its sole consumer when they share a runner,
 //! eliminating the artifact transfer between them (the data stays in-process).
-//! Effect-aware: the producer must be pure and neither unit an effect barrier,
+//! Consequence-aware: the producer must be pure and neither unit an effect barrier,
 //! and fusion preserves op order, so no effect is ever reordered.
 
 use super::{OptLevel, OptimizeCtx, Pass};
-use crate::planner::{ExecutionUnit, OptimizationDecision, PhysicalOp, Plan};
+use crate::planner::{ExecutionUnit, OptimizationDecision, LogicalOp, Plan};
 use std::collections::HashSet;
 use ustr::Ustr;
 
@@ -24,8 +24,9 @@ impl Pass for FusionPass {
 
             // Producer's compute ops (drop uploads of artifacts consumed here),
             // then consumer's ops (drop the matching downloads/transfers).
-            let mut ops: Vec<PhysicalOp> = producer.ops.iter().filter(|op| !is_upload_of(op, &shared)).cloned().collect();
+            let mut ops: Vec<LogicalOp> = producer.ops.iter().filter(|op| !is_upload_of(op, &shared)).cloned().collect();
             ops.extend(consumer.ops.drain(..).filter(|op| !is_pull_of(op, &shared)));
+            dedup_input_pulls(&mut ops);
             consumer.ops = ops;
 
             consumer.needs.retain(|n| *n != producer.id);
@@ -84,23 +85,40 @@ fn dependents(plan: &Plan, id: Ustr) -> usize {
 /// Producer outputs that the consumer pulls in (uploaded by P, downloaded by C).
 fn shared_artifacts(producer: &ExecutionUnit, consumer: &ExecutionUnit) -> HashSet<Ustr> {
     let produced: HashSet<Ustr> = producer.ops.iter().filter_map(|op| match op {
-        PhysicalOp::UploadArtifact { name, .. } => Some(*name),
+        LogicalOp::UploadArtifact { name, .. } => Some(*name),
         _ => None,
     }).collect();
     consumer.ops.iter().filter_map(|op| match op {
-        PhysicalOp::DownloadArtifact { name, .. } | PhysicalOp::TransferArtifact { name, .. }
+        LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. }
             if produced.contains(name) => Some(*name),
         _ => None,
     }).collect()
 }
 
-fn is_upload_of(op: &PhysicalOp, shared: &HashSet<Ustr>) -> bool {
-    matches!(op, PhysicalOp::UploadArtifact { name, .. } if shared.contains(name))
+/// Both halves of a fused unit may pull the same input (e.g. each downloaded
+/// `src`). Input acquisition is idempotent within one runner, so keep only the
+/// first of each identical checkout/download/transfer. Real work (shell, native,
+/// upload, cache) is never deduplicated.
+pub(super) fn dedup_input_pulls(ops: &mut Vec<LogicalOp>) {
+    let mut seen: HashSet<String> = HashSet::new();
+    ops.retain(|op| {
+        let key = match op {
+            LogicalOp::CheckoutRepo => "checkout".to_string(),
+            LogicalOp::DownloadArtifact { name, path } => format!("dl:{name}:{path:?}"),
+            LogicalOp::TransferArtifact { name, path, access } => format!("tr:{name}:{path:?}:{access:?}"),
+            _ => return true,
+        };
+        seen.insert(key)
+    });
 }
 
-fn is_pull_of(op: &PhysicalOp, shared: &HashSet<Ustr>) -> bool {
+fn is_upload_of(op: &LogicalOp, shared: &HashSet<Ustr>) -> bool {
+    matches!(op, LogicalOp::UploadArtifact { name, .. } if shared.contains(name))
+}
+
+fn is_pull_of(op: &LogicalOp, shared: &HashSet<Ustr>) -> bool {
     match op {
-        PhysicalOp::DownloadArtifact { name, .. } | PhysicalOp::TransferArtifact { name, .. } => shared.contains(name),
+        LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. } => shared.contains(name),
         _ => false,
     }
 }
@@ -122,7 +140,7 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, EffectKind, Workflow, WorkflowBuilder};
+    use crate::ir::{default_objectives, ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
     use crate::optimize::{optimize, OptLevel, OptimizeCtx};
     use crate::profile::Profile;
 
@@ -161,10 +179,35 @@ mod tests {
         assert_eq!(plan.units.len(), 1, "prep should be fused into build");
         let unit = &plan.units[0];
         assert_eq!(unit.action_name.as_str(), "build");
-        assert!(unit.ops.iter().any(|op| matches!(op, PhysicalOp::RunShell { script, .. } if script == "echo prep")));
+        assert!(unit.ops.iter().any(|op| matches!(op, LogicalOp::RunShell { script, .. } if script == "echo prep")));
         // The src transfer is gone (no upload, no download/transfer of "src").
         assert!(plan.access_mode("src").is_none());
         assert!(plan.optimizations.iter().any(|d| d.pass == "fusion"));
+    }
+
+    #[test]
+    fn fusion_dedups_shared_input_pull() {
+        // checkout (runner A) produces src; prep and build (runner H) both consume
+        // it. prep's output feeds only build, so prep fuses into build. The fused
+        // job must download src once, not once per fused half.
+        let mut b = WorkflowBuilder::new("w");
+        let src = b.artifact("src", ArtifactType::SourceTree);
+        let mid = b.artifact("mid", ArtifactType::Binary);
+        let bin = b.artifact("bin", ArtifactType::Binary);
+        let co = b.shell_action("checkout", "checkout", &[], &[src], "git");
+        let prep = b.shell_action("prep", "prep", &[src], &[mid], "echo prep");
+        let build = b.shell_action("build", "build", &[src, mid], &[bin], "make");
+        let a = b.actor("ci", &["x86_64"], &[]);
+        let h = b.actor("host", &["self-hosted"], &[]);
+        b.constrain_actor(co, a);
+        b.constrain_actor(prep, h);
+        b.constrain_actor(build, h);
+        let plan = run(&b.build(), OptLevel::O3);
+        let fused = plan.units.iter().find(|u| u.action_name.as_str() == "build").unwrap();
+        let src_downloads = fused.ops.iter()
+            .filter(|op| matches!(op, LogicalOp::DownloadArtifact { name, .. } if name.as_str() == "src"))
+            .count();
+        assert_eq!(src_downloads, 1, "shared input should be downloaded exactly once after fusion");
     }
 
     #[test]
@@ -195,8 +238,8 @@ mod tests {
         let bin = b.artifact("bin", ArtifactType::Binary);
         let prep = b.shell_action("prep", "prep", &[], &[src], "echo");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
-        let eff = b.effect("ship", EffectKind::Deployment, false);
-        b.add_effect_to(prep, eff); // producer carries a barrier effect
+        let eff = b.consequence("ship", ConsequenceKind::Deployment, false);
+        b.add_consequence_to(prep, eff); // producer carries a barrier effect
         let a = b.actor("host", &["self-hosted"], &[]);
         b.constrain_actor(prep, a);
         b.constrain_actor(build, a);

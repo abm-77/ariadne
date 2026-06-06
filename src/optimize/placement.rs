@@ -7,7 +7,7 @@ use super::{OptLevel, OptimizeCtx, Pass};
 use crate::backends::BackendCapabilities;
 use crate::diagnostics::{DiagCode, Diagnostic};
 use crate::ir::PlacementStrategy;
-use crate::planner::{AccessMode, ExecutionUnit, OptimizationDecision, PhysicalOp, Plan, MOUNT_CAPABILITY};
+use crate::planner::{AccessMode, ExecutionUnit, OptimizationDecision, LogicalOp, Plan, MOUNT_CAPABILITY};
 use ustr::Ustr;
 
 pub struct PlacementPass;
@@ -64,7 +64,7 @@ impl Pass for PlacementPass {
 
 fn touches(unit: &ExecutionUnit, name: Ustr) -> bool {
     unit.ops.iter().any(|op| match op {
-        PhysicalOp::UploadArtifact { name: n, .. } | PhysicalOp::DownloadArtifact { name: n, .. } => *n == name,
+        LogicalOp::UploadArtifact { name: n, .. } | LogicalOp::DownloadArtifact { name: n, .. } => *n == name,
         _ => false,
     })
 }
@@ -74,9 +74,9 @@ fn upgrade_to_mount(plan: &mut Plan, name: Ustr) {
     for unit in &mut plan.units {
         let ops = std::mem::take(&mut unit.ops);
         unit.ops = ops.into_iter().filter_map(|op| match op {
-            PhysicalOp::DownloadArtifact { name: n, path } if n == name =>
-                Some(PhysicalOp::TransferArtifact { name: n, path, access: AccessMode::MountReadOnly }),
-            PhysicalOp::UploadArtifact { name: n, .. } if n == name => None,
+            LogicalOp::DownloadArtifact { name: n, path } if n == name =>
+                Some(LogicalOp::TransferArtifact { name: n, path, access: AccessMode::MountReadOnly }),
+            LogicalOp::UploadArtifact { name: n, .. } if n == name => None,
             other => Some(other),
         }).collect();
     }
@@ -131,7 +131,7 @@ mod tests {
         assert_eq!(plan.access_mode("src"), Some(AccessMode::MountReadOnly));
         // The producer's upload was dropped (mounted, not uploaded).
         let prep = plan.units.iter().find(|u| u.action_name == "prep").unwrap();
-        assert!(!prep.ops.iter().any(|op| matches!(op, PhysicalOp::UploadArtifact { .. })));
+        assert!(!prep.ops.iter().any(|op| matches!(op, LogicalOp::UploadArtifact { .. })));
         assert!(plan.optimizations.iter().any(|d| d.to == "mount_read_only"));
     }
 

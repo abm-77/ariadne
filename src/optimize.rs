@@ -62,6 +62,7 @@ mod dedup;
 mod fusion;
 mod parallelization;
 mod placement;
+mod sibling_fusion;
 
 /// Registered passes in execution (safety) order. Reordering passes (dedup,
 /// fusion) come last and are gated by analysis barriers.
@@ -73,6 +74,7 @@ fn passes() -> Vec<Box<dyn Pass>> {
         Box::new(parallelization::ParallelizationPass),
         Box::new(dedup::DeduplicationPass),
         Box::new(fusion::FusionPass),
+        Box::new(sibling_fusion::SiblingFusionPass),
     ]
 }
 

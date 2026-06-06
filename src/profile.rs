@@ -19,6 +19,11 @@ pub struct Profile {
     /// Queue/scheduling delay in seconds, by runner label.
     #[serde(default)]
     pub queue_times: HashMap<String, f64>,
+    /// Fixed per-job setup cost in seconds (runner provisioning, workspace
+    /// preparation), by runner label. Paid once per execution unit, so packing
+    /// independent units into one job pays it once instead of per unit.
+    #[serde(default)]
+    pub setup_times: HashMap<String, f64>,
     /// Runner price in dollars per second, by runner label.
     #[serde(default)]
     pub runner_costs: HashMap<String, f64>,

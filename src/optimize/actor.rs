@@ -5,7 +5,7 @@
 //! capabilities are always respected.
 
 use super::{OptLevel, OptimizeCtx, Pass};
-use crate::ir::{Action, Actor, ActorConstraint, Workflow};
+use crate::ir::{ActionCall, Actor, ActorConstraint, Workflow};
 use crate::planner::{actor_for, OptimizationDecision, Plan};
 
 /// At/above this utilization an actor is treated as contended.
@@ -22,36 +22,36 @@ impl Pass for ActorPass {
     fn run(&self, plan: &mut Plan, ctx: &OptimizeCtx) -> Vec<OptimizationDecision> {
         let mut decisions = Vec::new();
         for unit in &mut plan.units {
-            let action = ctx.workflow.action(unit.action_id);
+            let action = ctx.workflow.action_call(unit.action_id);
             // Pinned actor, or no resolvable actor → leave as planned.
             let Some(candidates) = candidate_actors(action, ctx.workflow) else { continue };
             let Some(current) = actor_for(action, ctx.workflow) else { continue };
             // Profile-driven only: no utilization data ⇒ no change.
-            let Some(cur_util) = ctx.profile.utilization(current.name.as_str()) else { continue };
+            let Some(cur_util) = ctx.profile.utilization(current.id.as_str()) else { continue };
 
-            let util = |a: &Actor| ctx.profile.utilization(a.name.as_str()).unwrap_or(0.0);
+            let util = |a: &Actor| ctx.profile.utilization(a.id.as_str()).unwrap_or(0.0);
             let cost = |a: &Actor| a.labels.first()
                 .and_then(|l| ctx.profile.runner_costs.get(l.as_str()).copied())
                 .unwrap_or(f64::INFINITY);
-            let viable = |a: &Actor| a.name != current.name
+            let viable = |a: &Actor| a.id != current.id
                 && caps_superset(a, current)
                 && util(a) < SATURATED;
 
             let (choice, reason) = if cur_util >= SATURATED {
                 let pick = candidates.iter().copied().filter(|&a| viable(a))
                     .min_by(|&a, &b| util(a).total_cmp(&util(b)));
-                (pick, format!("actor '{}' saturated (util={cur_util:.2}); moved to reduce contention", current.name))
+                (pick, format!("actor '{}' saturated (util={cur_util:.2}); moved to reduce contention", current.id))
             } else if cur_util <= UNDER {
                 let cur_cost = cost(current);
                 let pick = candidates.iter().copied().filter(|&a| viable(a) && cost(a) < cur_cost)
                     .min_by(|&a, &b| cost(a).total_cmp(&cost(b)));
-                (pick, format!("actor '{}' under-utilized (util={cur_util:.2}); moved to a cheaper fit", current.name))
+                (pick, format!("actor '{}' under-utilized (util={cur_util:.2}); moved to a cheaper fit", current.id))
             } else {
                 (None, String::new())
             };
 
             if let Some(new) = choice {
-                let from = current.name.to_string();
+                let from = current.id.to_string();
                 if let Some(label) = new.labels.first() {
                     unit.runner = *label;
                 }
@@ -60,7 +60,7 @@ impl Pass for ActorPass {
                     pass: "actor".into(),
                     target: unit.id.to_string(),
                     from,
-                    to: new.name.to_string(),
+                    to: new.id.to_string(),
                     reason,
                 });
             }
@@ -73,7 +73,7 @@ impl Pass for ActorPass {
 /// specific actor (a hard constraint we never override). With only label
 /// constraints, every actor carrying a required label qualifies; with none,
 /// any actor does.
-fn candidate_actors<'a>(action: &Action, workflow: &'a Workflow) -> Option<Vec<&'a Actor>> {
+fn candidate_actors<'a>(action: &ActionCall, workflow: &'a Workflow) -> Option<Vec<&'a Actor>> {
     if action.actor_constraints.iter().any(|c| matches!(c, ActorConstraint::Specific(_))) {
         return None;
     }
@@ -81,9 +81,9 @@ fn candidate_actors<'a>(action: &Action, workflow: &'a Workflow) -> Option<Vec<&
         .filter_map(|c| match c { ActorConstraint::Label(l) => Some(*l), _ => None })
         .collect();
     let actors: Vec<&Actor> = if labels.is_empty() {
-        workflow.actors.iter().collect()
+        workflow.actors().iter().collect()
     } else {
-        workflow.actors.iter()
+        workflow.actors().iter()
             .filter(|a| labels.iter().all(|l| a.labels.contains(l)))
             .collect()
     };

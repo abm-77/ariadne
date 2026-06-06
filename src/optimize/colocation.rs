@@ -6,7 +6,7 @@
 
 use super::{OptLevel, OptimizeCtx, Pass};
 use crate::backends::BackendCapabilities;
-use crate::planner::{AccessMode, ExecutionUnit, OptimizationDecision, PhysicalOp, Plan};
+use crate::planner::{AccessMode, ExecutionUnit, OptimizationDecision, LogicalOp, Plan};
 use ustr::Ustr;
 
 pub struct ColocationPass;
@@ -32,9 +32,9 @@ impl Pass for ColocationPass {
             for unit in &mut plan.units {
                 let ops = std::mem::take(&mut unit.ops);
                 unit.ops = ops.into_iter().filter_map(|op| match op {
-                    PhysicalOp::DownloadArtifact { name: n, path } if n == name =>
-                        Some(PhysicalOp::TransferArtifact { name: n, path, access: AccessMode::SameHostPath }),
-                    PhysicalOp::UploadArtifact { name: n, .. } if n == name => None,
+                    LogicalOp::DownloadArtifact { name: n, path } if n == name =>
+                        Some(LogicalOp::TransferArtifact { name: n, path, access: AccessMode::SameHostPath }),
+                    LogicalOp::UploadArtifact { name: n, .. } if n == name => None,
                     other => Some(other),
                 }).collect();
             }
@@ -55,7 +55,7 @@ fn copied_artifacts(plan: &Plan) -> Vec<Ustr> {
     let mut names = Vec::new();
     for unit in &plan.units {
         for op in &unit.ops {
-            if let PhysicalOp::DownloadArtifact { name, .. } = op
+            if let LogicalOp::DownloadArtifact { name, .. } = op
                 && !names.contains(name)
             {
                 names.push(*name);
@@ -67,7 +67,7 @@ fn copied_artifacts(plan: &Plan) -> Vec<Ustr> {
 
 fn touches(unit: &ExecutionUnit, name: Ustr) -> bool {
     unit.ops.iter().any(|op| match op {
-        PhysicalOp::UploadArtifact { name: n, .. } | PhysicalOp::DownloadArtifact { name: n, .. } => *n == name,
+        LogicalOp::UploadArtifact { name: n, .. } | LogicalOp::DownloadArtifact { name: n, .. } => *n == name,
         _ => false,
     })
 }
@@ -114,7 +114,7 @@ mod tests {
         let plan = run(&same_host_wf(), BackendCapabilities::COLOCATION, OptLevel::O2);
         assert_eq!(plan.access_mode("src"), Some(AccessMode::SameHostPath));
         let prep = plan.units.iter().find(|u| u.action_name == "prep").unwrap();
-        assert!(!prep.ops.iter().any(|op| matches!(op, PhysicalOp::UploadArtifact { .. })));
+        assert!(!prep.ops.iter().any(|op| matches!(op, LogicalOp::UploadArtifact { .. })));
         assert!(plan.optimizations.iter().any(|d| d.to == "same_host_path"));
     }
 

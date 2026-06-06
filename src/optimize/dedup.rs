@@ -4,7 +4,7 @@
 //! outputs. Effectful or barrier units are never deduplicated.
 
 use super::{OptLevel, OptimizeCtx, Pass};
-use crate::planner::{ExecutionUnit, OptimizationDecision, PhysicalOp, Plan};
+use crate::planner::{ExecutionUnit, OptimizationDecision, LogicalOp, Plan};
 use std::collections::HashMap;
 use ustr::Ustr;
 
@@ -60,7 +60,7 @@ impl Pass for DeduplicationPass {
                 }
             }
             for op in &mut u.ops {
-                if let PhysicalOp::DownloadArtifact { name, .. } | PhysicalOp::TransferArtifact { name, .. } = op
+                if let LogicalOp::DownloadArtifact { name, .. } | LogicalOp::TransferArtifact { name, .. } = op
                     && let Some(k) = out_remap.get(name)
                 {
                     *name = *k;
@@ -78,18 +78,22 @@ fn signature(u: &ExecutionUnit) -> Vec<String> {
     sig.sort();
     for op in &u.ops {
         match op {
-            PhysicalOp::CheckoutRepo => sig.push("C".into()),
-            PhysicalOp::RunShell { script, env, .. } => {
+            LogicalOp::CheckoutRepo => sig.push("C".into()),
+            LogicalOp::RunShell { script, env, .. } => {
                 let mut e: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 e.sort();
                 sig.push(format!("R:{script}:{}", e.join(",")));
             }
-            PhysicalOp::DownloadArtifact { name, .. } => sig.push(format!("D:{name}")),
-            PhysicalOp::TransferArtifact { name, access, .. } => sig.push(format!("T:{name}:{access:?}")),
-            PhysicalOp::RestoreCache { key } => sig.push(format!("RC:{key}")),
-            PhysicalOp::SaveCache { key } => sig.push(format!("SC:{key}")),
-            PhysicalOp::RequestApproval { reason } => sig.push(format!("AP:{reason}")),
-            PhysicalOp::UploadArtifact { .. } => {}
+            LogicalOp::DownloadArtifact { name, .. } => sig.push(format!("D:{name}")),
+            LogicalOp::TransferArtifact { name, access, .. } => sig.push(format!("T:{name}:{access:?}")),
+            LogicalOp::RestoreCache { key } => sig.push(format!("RC:{key}")),
+            LogicalOp::SaveCache { key } => sig.push(format!("SC:{key}")),
+            LogicalOp::RequestApproval { reason } => sig.push(format!("AP:{reason}")),
+            LogicalOp::Native { id, args, fallback } => {
+                let a: Vec<String> = args.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                sig.push(format!("NA:{id}:{}:{fallback}", a.join(",")));
+            }
+            LogicalOp::UploadArtifact { .. } => {}
         }
     }
     sig
@@ -97,7 +101,7 @@ fn signature(u: &ExecutionUnit) -> Vec<String> {
 
 fn outputs(u: &ExecutionUnit) -> Vec<Ustr> {
     u.ops.iter().filter_map(|op| match op {
-        PhysicalOp::UploadArtifact { name, .. } => Some(*name),
+        LogicalOp::UploadArtifact { name, .. } => Some(*name),
         _ => None,
     }).collect()
 }
@@ -107,7 +111,7 @@ mod tests {
     use super::*;
     use crate::analysis::Analysis;
     use crate::backends::BackendCapabilities;
-    use crate::ir::{default_objectives, ArtifactType, EffectKind, Workflow, WorkflowBuilder};
+    use crate::ir::{default_objectives, ArtifactType, ConsequenceKind, Workflow, WorkflowBuilder};
     use crate::optimize::{optimize, OptLevel, OptimizeCtx};
     use crate::profile::Profile;
 
@@ -153,7 +157,7 @@ mod tests {
         let use_2 = plan.units.iter().find(|u| u.action_name == "use_2").unwrap();
         // use_2 was rewired onto gen_a and its output "tool_a".
         assert!(use_2.needs.contains(&gen_a.id));
-        assert!(use_2.ops.iter().any(|op| matches!(op, PhysicalOp::DownloadArtifact { name, .. } if name == "tool_a")));
+        assert!(use_2.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { name, .. } if name == "tool_a")));
         assert!(plan.optimizations.iter().any(|d| d.pass == "dedup"));
     }
 
@@ -182,10 +186,10 @@ mod tests {
         let c = b.artifact("c", ArtifactType::Binary);
         let x = b.shell_action("x", "deploy", &[], &[a], "ship");
         let y = b.shell_action("y", "deploy", &[], &[c], "ship");
-        let e1 = b.effect("ship1", EffectKind::Deployment, false);
-        let e2 = b.effect("ship2", EffectKind::Deployment, false);
-        b.add_effect_to(x, e1);
-        b.add_effect_to(y, e2);
+        let e1 = b.consequence("ship1", ConsequenceKind::Deployment, false);
+        let e2 = b.consequence("ship2", ConsequenceKind::Deployment, false);
+        b.add_consequence_to(x, e1);
+        b.add_consequence_to(y, e2);
         b.actor("r", &["ubuntu-latest"], &[]);
         let plan = run(&b.build(), OptLevel::O3);
         assert_eq!(plan.units.len(), 2, "two deploys are not the same effect");
