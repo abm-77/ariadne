@@ -1,10 +1,10 @@
 use crate::diagnostics::{DiagCode, Diagnostic};
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
-use std::collections::{HashMap, VecDeque};
-use crate::ir::{Action, ActionId, Actor, ActorConstraint, Workflow};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use crate::ir::{self, ActionCall, ActionCallId, Actor, ActorConstraint, ShellAction, Workflow};
 
-pub use crate::ir::EffectKind;
+pub use crate::ir::ConsequenceKind;
 
 /// Well-known capability the planner reasons about for placement: an actor with
 /// it can mount shared volumes, enabling mount transfers instead of copies.
@@ -14,9 +14,9 @@ pub const MOUNT_CAPABILITY: &str = "mount";
 /// An effect lowered onto an execution unit. Effects never run during `loom
 /// test`; they are recorded so a test can assert which would fire or be gated.
 #[derive(Debug, Clone)]
-pub struct EffectInfo {
+pub struct ConsequenceInfo {
     pub name: Ustr,
-    pub kind: EffectKind,
+    pub kind: ConsequenceKind,
     pub requires_approval: bool,
 }
 
@@ -48,10 +48,10 @@ impl EventContext {
 
 /// An effect fires only if the event permits it and it needs no approval;
 /// otherwise it is gated. Effects are never executed either way.
-pub fn partition_effects(effects: &[EffectInfo], event: &EventContext) -> (Vec<EffectInfo>, Vec<EffectInfo>) {
+pub fn partition_consequences(consequences: &[ConsequenceInfo], event: &EventContext) -> (Vec<ConsequenceInfo>, Vec<ConsequenceInfo>) {
     let mut fired = Vec::new();
     let mut gated = Vec::new();
-    for e in effects {
+    for e in consequences {
         if event.effects_allowed() && !e.requires_approval {
             fired.push(e.clone());
         } else {
@@ -64,33 +64,39 @@ pub fn partition_effects(effects: &[EffectInfo], event: &EventContext) -> (Vec<E
 /// Backend-neutral physical operations.
 /// The planner emits these; instruction selection maps them to backend-specific steps.
 #[derive(Debug, Clone)]
-pub enum PhysicalOp {
+pub enum LogicalOp {
     CheckoutRepo,
     RunShell {
         label: Ustr,
         script: String,
         env: HashMap<String, String>,
     },
-    UploadArtifact { name: Ustr, path: Option<String> },
+    UploadArtifact { name: Ustr, path: Option<String>, lifetime: Option<String> },
     DownloadArtifact { name: Ustr, path: Option<String> },
     TransferArtifact { name: Ustr, path: Option<String>, access: AccessMode },
     RestoreCache { key: Ustr },
     SaveCache { key: Ustr },
     RequestApproval { reason: String },
+    /// A portable semantic instruction. Backends may upgrade it to a native
+    /// step (e.g. a GitHub `uses:` action) via their catalogue when the
+    /// inventory permits; otherwise `fallback` is run as a shell command. This
+    /// keeps the plan backend-agnostic while allowing emit-time native steps.
+    Native { id: Ustr, args: BTreeMap<String, String>, fallback: String },
 }
 
-impl PhysicalOp {
+impl LogicalOp {
     /// Stable variant name, used for instruction matching and selection.
     pub fn name(&self) -> &'static str {
         match self {
-            PhysicalOp::CheckoutRepo => "CheckoutRepo",
-            PhysicalOp::RunShell { .. } => "RunShell",
-            PhysicalOp::UploadArtifact { .. } => "UploadArtifact",
-            PhysicalOp::DownloadArtifact { .. } => "DownloadArtifact",
-            PhysicalOp::TransferArtifact { .. } => "TransferArtifact",
-            PhysicalOp::RestoreCache { .. } => "RestoreCache",
-            PhysicalOp::SaveCache { .. } => "SaveCache",
-            PhysicalOp::RequestApproval { .. } => "RequestApproval",
+            LogicalOp::CheckoutRepo => "CheckoutRepo",
+            LogicalOp::RunShell { .. } => "RunShell",
+            LogicalOp::UploadArtifact { .. } => "UploadArtifact",
+            LogicalOp::DownloadArtifact { .. } => "DownloadArtifact",
+            LogicalOp::TransferArtifact { .. } => "TransferArtifact",
+            LogicalOp::RestoreCache { .. } => "RestoreCache",
+            LogicalOp::SaveCache { .. } => "SaveCache",
+            LogicalOp::RequestApproval { .. } => "RequestApproval",
+            LogicalOp::Native { .. } => "Native",
         }
     }
 }
@@ -111,24 +117,28 @@ pub enum AccessMode {
 #[derive(Debug, Clone)]
 pub struct ExecutionUnit {
     pub id: Ustr,
-    pub action_id: ActionId,
+    pub action_id: ActionCallId,
     pub action_name: Ustr,
     pub needs: Vec<Ustr>,
-    pub ops: Vec<PhysicalOp>,
+    pub ops: Vec<LogicalOp>,
     pub runner: Ustr,
     /// Secrets this unit's action declared. The executor/backend decides how to
     /// wire them; under `loom test` they are spoofed into the container env.
     pub secrets: Vec<Ustr>,
     /// Effects this unit's action declared. Recorded, never executed.
-    pub effects: Vec<EffectInfo>,
+    pub consequences: Vec<ConsequenceInfo>,
     /// Effects that would fire under the plan's event (subset of `effects`).
-    pub effects_fired: Vec<EffectInfo>,
+    pub consequences_fired: Vec<ConsequenceInfo>,
     /// Effects gated by the event or by required approval (subset of `effects`).
-    pub effects_gated: Vec<EffectInfo>,
+    pub consequences_gated: Vec<ConsequenceInfo>,
     /// Whether this unit's secrets are available under the plan's event.
     pub secrets_available: bool,
     /// Capabilities the unit's resolved actor provides (open strings).
     pub actor_capabilities: Vec<Ustr>,
+    /// Maximum execution duration for this unit (e.g. "30m"), if declared.
+    pub timeout: Option<String>,
+    /// Action-level concurrency control, if declared.
+    pub coordination: Option<ir::Coordination>,
 }
 
 /// A recorded optimization decision, filled by the optimize phase and surfaced
@@ -153,6 +163,15 @@ pub struct Plan {
     pub event: EventContext,
     /// Optimization decisions applied to this plan (empty for a baseline plan).
     pub optimizations: Vec<OptimizationDecision>,
+    /// Instruction-selection capabilities derived from the inventory's available
+    /// implementations (e.g. "impl.pypa-publish-action"). Backends use these to
+    /// decide whether to upgrade a `Native` op to a native step at emit time.
+    pub impl_capabilities: Vec<String>,
+    /// How the workflow is entered. Backends emit their native trigger block
+    /// from this; empty means the backend's default trigger.
+    pub triggers: Vec<ir::Trigger>,
+    /// Workflow-level concurrency control, if declared.
+    pub coordination: Option<ir::Coordination>,
 }
 
 impl Plan {
@@ -162,8 +181,8 @@ impl Plan {
         for unit in &self.units {
             for op in &unit.ops {
                 match op {
-                    PhysicalOp::TransferArtifact { name, access, .. } if name == artifact => return Some(*access),
-                    PhysicalOp::DownloadArtifact { name, .. } if name == artifact => return Some(AccessMode::Copy),
+                    LogicalOp::TransferArtifact { name, access, .. } if name == artifact => return Some(*access),
+                    LogicalOp::DownloadArtifact { name, .. } if name == artifact => return Some(AccessMode::Copy),
                     _ => {}
                 }
             }
@@ -187,6 +206,17 @@ impl Plan {
     }
 }
 
+fn impl_to_shell(i: &ir::Implementation) -> Option<ShellAction> {
+    match i {
+        ir::Implementation::Shell { run, env, capture } => Some(ShellAction {
+            script: run.clone(),
+            env: env.clone(),
+            capture: capture.clone(),
+        }),
+        _ => None,
+    }
+}
+
 /// Plan under the default push event.
 pub fn plan(workflow: &Workflow) -> Result<Plan, Vec<Diagnostic>> {
     plan_for(workflow, &EventContext::default())
@@ -197,16 +227,17 @@ pub fn plan(workflow: &Workflow) -> Result<Plan, Vec<Diagnostic>> {
 pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<Diagnostic>> {
     let topo = topo_sort(workflow)?;
 
-    let default_runner: Ustr = workflow.actors.first()
+    let default_runner: Ustr = workflow.actors().first()
         .and_then(|a| a.labels.first().copied())
         .unwrap_or_else(|| Ustr::from("ubuntu-latest"));
 
-    let mut unit_id_for_action: HashMap<ActionId, Ustr> = HashMap::new();
+    let mut unit_id_for_action: HashMap<ActionCallId, Ustr> = HashMap::new();
     let mut units: Vec<ExecutionUnit> = Vec::new();
     let diagnostics: Vec<Diagnostic> = Vec::new();
+    let lowering_registry = crate::lowering::Registry::builtin();
 
     for action_id in topo {
-        let action = workflow.action(action_id);
+        let action = workflow.action_call(action_id);
         let unit_id = Ustr::from(sanitize_id(&action.name).as_str());
         unit_id_for_action.insert(action_id, unit_id);
 
@@ -219,7 +250,7 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
             .collect();
         needs.sort();
 
-        let mut ops: Vec<PhysicalOp> = Vec::new();
+        let mut ops: Vec<LogicalOp> = Vec::new();
 
         // Baseline placement is always copy (upload/download) — the legal
         // fallback. The placement optimization pass upgrades to mount/colocation
@@ -229,22 +260,51 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
             if art.producer.is_none() || art.producer == Some(action_id) {
                 continue;
             }
-            ops.push(PhysicalOp::DownloadArtifact { name: art.name, path: art.path.clone() });
+            ops.push(LogicalOp::DownloadArtifact { name: art.name, path: art.path.clone() });
         }
 
-        let op_def = workflow.find_op(action.op.as_str());
-        let is_checkout = action.op.as_str() == "checkout"
-            || op_def.is_some_and(|d| d.implementations.iter().any(|i| i.is_checkout()));
+        let op_def = workflow.find_action_def(action.action.as_str());
+        let is_checkout = action.action.as_str() == "checkout"
+            || op_def.is_some_and(|d| {
+                d.implementations.iter().any(|i| matches!(i, ir::Implementation::Checkout))
+            });
 
-        if is_checkout {
-            ops.push(PhysicalOp::CheckoutRepo);
+        // A semantic action defers its concrete realization to backend-agnostic
+        // lowering: the inventory's available implementations decide which tool
+        // is used. This keeps the workflow expressing intent, not commands.
+        let semantic = op_def.and_then(|d| d.implementations.iter().find_map(|i| match i {
+            ir::Implementation::Semantic { op, args, using, prefer } => {
+                Some((op.clone(), args.clone(), using.clone(), prefer.clone()))
+            }
+            _ => None,
+        }));
+
+        if let Some((op, args, using, prefer)) = semantic {
+            let caps: Vec<crate::select::Capability> = actor_for(action, workflow)
+                .map(|a| a.capabilities.iter().map(crate::select::Capability::new).collect())
+                .unwrap_or_default();
+            match lowering_registry.select_using(&op, &args, workflow.inventory.as_ref(), &caps, using.as_deref(), &prefer) {
+                Ok(sel) => match sel.realization {
+                    crate::lowering::Realization::Shell(script) => ops.push(LogicalOp::RunShell {
+                        label: action.name,
+                        script,
+                        env: Default::default(),
+                    }),
+                    crate::lowering::Realization::Native { id, args, fallback } => {
+                        ops.push(LogicalOp::Native { id: Ustr::from(&id), args, fallback })
+                    }
+                },
+                Err(d) => return Err(vec![d]),
+            }
+        } else if is_checkout {
+            ops.push(LogicalOp::CheckoutRepo);
         } else {
             // Prefer the action's own shell script; fall back to the op
             // definition's first shell-capable implementation.
-            let impl_shell = op_def.and_then(|d| d.implementations.iter().find_map(|i| i.to_shell()));
+            let impl_shell = op_def.and_then(|d| d.implementations.iter().find_map(impl_to_shell));
             let effective = action.shell.as_ref().or(impl_shell.as_ref());
             if let Some(sh) = effective {
-                ops.push(PhysicalOp::RunShell {
+                ops.push(LogicalOp::RunShell {
                     label: action.name,
                     script: sh.script.clone(),
                     env: sh.env.clone(),
@@ -254,14 +314,26 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
 
         for &out_id in &action.outputs {
             let out = workflow.artifact(out_id);
-            ops.push(PhysicalOp::UploadArtifact { name: out.name, path: out.path.clone() });
+            ops.push(LogicalOp::UploadArtifact {
+                name: out.name,
+                path: out.path.clone(),
+                lifetime: out.lifetime.clone(),
+            });
         }
 
-        let effects: Vec<EffectInfo> = action.effects.iter().map(|&eid| {
-            let e = workflow.effect(eid);
-            EffectInfo { name: e.name, kind: e.kind.clone(), requires_approval: e.requires_approval }
+        let consequences: Vec<ConsequenceInfo> = action.consequences.iter().map(|&eid| {
+            let e = workflow.consequence(eid);
+            ConsequenceInfo { name: e.name, kind: e.kind.clone(), requires_approval: e.requires_approval }
         }).collect();
-        let (effects_fired, effects_gated) = partition_effects(&effects, event);
+        let (consequences_fired, consequences_gated) = partition_consequences(&consequences, event);
+
+        // Insert a RequestApproval op for each approval-gated consequence so
+        // backends can lower it to an environment gate / interactive prompt.
+        for csq in &consequences_gated {
+            if csq.requires_approval {
+                ops.push(LogicalOp::RequestApproval { reason: csq.name.to_string() });
+            }
+        }
 
         let actor = actor_for(action, workflow);
         let runner = actor.and_then(|a| a.labels.first().copied())
@@ -276,13 +348,22 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
             ops,
             runner,
             secrets: action.secrets.clone(),
-            effects,
-            effects_fired,
-            effects_gated,
+            consequences,
+            consequences_fired,
+            consequences_gated,
             secrets_available: event.secrets_available(),
             actor_capabilities,
+            timeout: action.timeout.clone(),
+            coordination: action.coordination.clone(),
         });
     }
+
+    let impl_capabilities = workflow.inventory.as_ref().map(|inv| {
+        inv.implementations.iter()
+            .filter(|m| !m.deny)
+            .map(|m| format!("impl.{}", m.id))
+            .collect()
+    }).unwrap_or_default();
 
     Ok(Plan {
         workflow_name: workflow.name,
@@ -291,6 +372,9 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
         diagnostics,
         event: event.clone(),
         optimizations: Vec::new(),
+        impl_capabilities,
+        triggers: workflow.triggers.clone(),
+        coordination: workflow.coordination.clone(),
     })
 }
 
@@ -298,26 +382,34 @@ fn sanitize_id(name: &str) -> String {
     name.to_lowercase().replace([' ', '_'], "-")
 }
 
-pub(crate) fn actor_for<'a>(action: &Action, workflow: &'a Workflow) -> Option<&'a Actor> {
+pub(crate) fn actor_for<'a>(action: &ActionCall, workflow: &'a Workflow) -> Option<&'a Actor> {
+    // An action's resource requirements bias selection toward an actor that
+    // satisfies them. A pinned (Specific) actor is honored regardless;
+    // validation separately guarantees feasibility.
+    let ok = |a: &Actor| action.resources.as_ref().is_none_or(|r| a.satisfies(r));
     for c in &action.actor_constraints {
         match c {
             ActorConstraint::Specific(id) => return Some(workflow.actor(*id)),
             ActorConstraint::Label(label) => {
-                if let Some(a) = workflow.actors.iter().find(|a| a.labels.iter().any(|l| l == label)) {
+                let matches = || workflow.actors().iter().filter(|a| a.labels.iter().any(|l| l == label));
+                if let Some(a) = matches().find(|a| ok(a)) {
+                    return Some(a);
+                }
+                if let Some(a) = matches().next() {
                     return Some(a);
                 }
             }
         }
     }
-    workflow.actors.first()
+    workflow.actors().iter().find(|a| ok(a)).or_else(|| workflow.actors().first())
 }
 
-fn topo_sort(workflow: &Workflow) -> Result<Vec<ActionId>, Vec<Diagnostic>> {
-    let n = workflow.actions.len();
+fn topo_sort(workflow: &Workflow) -> Result<Vec<ActionCallId>, Vec<Diagnostic>> {
+    let n = workflow.action_calls.len();
     let mut in_degree: Vec<usize> = vec![0; n];
     let mut rdeps: Vec<Vec<usize>> = vec![Vec::new(); n];
 
-    for (idx, action) in workflow.actions.iter().enumerate() {
+    for (idx, action) in workflow.action_calls.iter().enumerate() {
         let preds: std::collections::HashSet<usize> = action.inputs.iter()
             .filter_map(|&art_id| workflow.artifact(art_id).producer)
             .filter(|&p| p.idx() != idx)
@@ -334,10 +426,10 @@ fn topo_sort(workflow: &Workflow) -> Result<Vec<ActionId>, Vec<Diagnostic>> {
     initial.sort();
     queue.extend(initial);
 
-    let mut order: Vec<ActionId> = Vec::with_capacity(n);
+    let mut order: Vec<ActionCallId> = Vec::with_capacity(n);
 
     while let Some(idx) = queue.pop_front() {
-        order.push(ActionId(idx as u32));
+        order.push(ActionCallId(idx as u32));
         let mut newly_ready: Vec<usize> = Vec::new();
         for &dep in &rdeps[idx] {
             in_degree[dep] -= 1;
@@ -402,34 +494,34 @@ mod tests {
     #[test]
     fn deployment_effect_preserved_on_action() {
         let mut wf = simple_workflow();
-        let eff_id = EffectId(0);
-        wf.effects.push(Effect { name: "deploy".into(), kind: EffectKind::Deployment, requires_approval: true });
-        wf.actions[2].effects.push(eff_id);
+        let eff_id = ConsequenceId(0);
+        wf.consequences.push(Consequence { name: "deploy".into(), kind: ConsequenceKind::Deployment, requires_approval: true });
+        wf.action_calls[2].consequences.push(eff_id);
         let p = plan(&wf).unwrap();
         let test_unit = p.units.iter().find(|u| u.action_name == "test").unwrap();
-        assert!(wf.action(test_unit.action_id).effects.contains(&eff_id));
+        assert!(wf.action_call(test_unit.action_id).consequences.contains(&eff_id));
     }
 
     #[test]
     fn checkout_op_emits_checkout_repo_physical_op() {
         let plan = plan(&simple_workflow()).unwrap();
         let checkout = plan.units.iter().find(|u| u.action_name == "checkout").unwrap();
-        assert!(checkout.ops.iter().any(|op| matches!(op, PhysicalOp::CheckoutRepo)));
+        assert!(checkout.ops.iter().any(|op| matches!(op, LogicalOp::CheckoutRepo)));
     }
 
     #[test]
     fn shell_op_emits_run_shell_physical_op() {
         let plan = plan(&simple_workflow()).unwrap();
         let build = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-        assert!(build.ops.iter().any(|op| matches!(op, PhysicalOp::RunShell { .. })));
+        assert!(build.ops.iter().any(|op| matches!(op, LogicalOp::RunShell { .. })));
     }
 
     #[test]
     fn cross_unit_artifact_uses_copy_without_placement() {
         let plan = plan(&simple_workflow()).unwrap();
         let build = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-        assert!(build.ops.iter().any(|op| matches!(op, PhysicalOp::DownloadArtifact { .. })));
-        assert!(!build.ops.iter().any(|op| matches!(op, PhysicalOp::TransferArtifact { .. })));
+        assert!(build.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
+        assert!(!build.ops.iter().any(|op| matches!(op, LogicalOp::TransferArtifact { .. })));
     }
 
     #[test]
@@ -448,20 +540,20 @@ mod tests {
         b.place(src, PlacementStrategy::SharedVolume { path: "/vol".into() });
         let plan = plan(&b.build()).unwrap();
         let build_unit = plan.units.iter().find(|u| u.action_name == "build").unwrap();
-        assert!(build_unit.ops.iter().any(|op| matches!(op, PhysicalOp::DownloadArtifact { .. })));
-        assert!(!build_unit.ops.iter().any(|op| matches!(op, PhysicalOp::TransferArtifact { .. })));
+        assert!(build_unit.ops.iter().any(|op| matches!(op, LogicalOp::DownloadArtifact { .. })));
+        assert!(!build_unit.ops.iter().any(|op| matches!(op, LogicalOp::TransferArtifact { .. })));
     }
 
     #[test]
     fn effects_lowered_onto_unit() {
         let mut wf = simple_workflow();
-        wf.effects.push(Effect { name: "deploy".into(), kind: EffectKind::Deployment, requires_approval: true });
-        wf.actions[2].effects.push(EffectId(0));
+        wf.consequences.push(Consequence { name: "deploy".into(), kind: ConsequenceKind::Deployment, requires_approval: true });
+        wf.action_calls[2].consequences.push(ConsequenceId(0));
         let plan = plan(&wf).unwrap();
         let test_unit = plan.units.iter().find(|u| u.action_name == "test").unwrap();
-        assert_eq!(test_unit.effects.len(), 1);
-        assert_eq!(test_unit.effects[0].name, "deploy");
-        assert!(test_unit.effects[0].requires_approval);
+        assert_eq!(test_unit.consequences.len(), 1);
+        assert_eq!(test_unit.consequences[0].name, "deploy");
+        assert!(test_unit.consequences[0].requires_approval);
     }
 
     fn deploy_workflow(approval: bool) -> Workflow {
@@ -469,8 +561,8 @@ mod tests {
         let bin = b.artifact("bin", ArtifactType::Binary);
         let a = b.shell_action("deploy", "deploy", &[], &[bin], "x");
         b.add_secrets(a, &["TOKEN"]);
-        let e = b.effect("ship", EffectKind::Deployment, approval);
-        b.add_effect_to(a, e);
+        let e = b.consequence("ship", ConsequenceKind::Deployment, approval);
+        b.add_consequence_to(a, e);
         b.actor("l", &["ubuntu-latest"], &[]);
         b.build()
     }
@@ -479,26 +571,26 @@ mod tests {
     fn effect_fires_on_push_gated_on_pr() {
         let wf = deploy_workflow(false);
         let push = plan_for(&wf, &EventContext::Push { branch: "main".into() }).unwrap();
-        assert!(push.units[0].effects_fired.iter().any(|e| e.name == "ship"));
-        assert!(push.units[0].effects_gated.is_empty());
+        assert!(push.units[0].consequences_fired.iter().any(|e| e.name == "ship"));
+        assert!(push.units[0].consequences_gated.is_empty());
 
         let pr = plan_for(&wf, &EventContext::PullRequest { fork: false }).unwrap();
-        assert!(pr.units[0].effects_gated.iter().any(|e| e.name == "ship"));
-        assert!(pr.units[0].effects_fired.is_empty());
+        assert!(pr.units[0].consequences_gated.iter().any(|e| e.name == "ship"));
+        assert!(pr.units[0].consequences_fired.is_empty());
     }
 
     #[test]
     fn approval_effect_gated_even_on_push() {
         let push = plan_for(&deploy_workflow(true), &EventContext::default()).unwrap();
-        assert!(push.units[0].effects_gated.iter().any(|e| e.name == "ship"));
-        assert!(push.units[0].effects_fired.is_empty());
+        assert!(push.units[0].consequences_gated.iter().any(|e| e.name == "ship"));
+        assert!(push.units[0].consequences_fired.is_empty());
     }
 
     #[test]
     fn secrets_available_depends_on_event() {
         let wf = deploy_workflow(false);
         assert!(plan_for(&wf, &EventContext::default()).unwrap().units[0].secrets_available);
-        assert!(plan_for(&wf, &EventContext::PullRequest { fork: true }).unwrap().units[0].secrets_available == false);
+        assert!(!plan_for(&wf, &EventContext::PullRequest { fork: true }).unwrap().units[0].secrets_available);
     }
 
     #[test]
@@ -526,7 +618,7 @@ mod tests {
         b.actor("l", &["ubuntu-latest"], &[]);
         let plan = plan(&b.build()).unwrap();
         assert!(plan.units[0].ops.iter().any(|op|
-            matches!(op, PhysicalOp::UploadArtifact { path: Some(p), .. } if p == "target/app")));
+            matches!(op, LogicalOp::UploadArtifact { path: Some(p), .. } if p == "target/app")));
     }
 
     #[test]

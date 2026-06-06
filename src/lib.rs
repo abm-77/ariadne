@@ -1,14 +1,18 @@
 pub mod ir;
 pub mod proto;
 pub mod diagnostics;
+pub mod select;
 pub mod validate;
 pub mod analysis;
 pub mod profile;
 pub mod cost;
+pub mod lowering;
 pub mod planner;
 pub mod optimize;
 pub mod backends;
+pub mod telemetry;
 pub mod testing;
+pub mod docs;
 
 pub use ir::Workflow;
 

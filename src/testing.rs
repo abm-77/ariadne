@@ -5,7 +5,7 @@
 use crate::backends::github::GithubActionsBackend;
 use crate::backends::{Backend, Selector};
 use crate::ir::Workflow;
-use crate::planner::{plan_for, EffectInfo, EffectKind, Plan, PhysicalOp};
+use crate::planner::{plan_for, ConsequenceInfo, ConsequenceKind, Plan, LogicalOp};
 use serde::{Deserialize, Serialize};
 
 pub use crate::planner::EventContext;
@@ -41,8 +41,8 @@ pub struct UnitOutcome {
     pub artifacts: Vec<String>,
     pub secrets_spoofed: Vec<String>,
     pub secrets_withheld: Vec<String>,
-    pub effects_fired: Vec<EffectInfo>,
-    pub effects_gated: Vec<EffectInfo>,
+    pub consequences_fired: Vec<ConsequenceInfo>,
+    pub consequences_gated: Vec<ConsequenceInfo>,
     pub transfers: Vec<ArtifactTransfer>,
 }
 
@@ -72,10 +72,10 @@ impl TestRun {
         self.units.iter().flat_map(|u| &u.transfers).find(|t| t.name == artifact).map(|t| t.kind)
     }
     pub fn effect_fired(&self, name: &str) -> bool {
-        self.units.iter().any(|u| u.effects_fired.iter().any(|e| e.name == name))
+        self.units.iter().any(|u| u.consequences_fired.iter().any(|e| e.name == name))
     }
     pub fn effect_gated(&self, name: &str) -> bool {
-        self.units.iter().any(|u| u.effects_gated.iter().any(|e| e.name == name))
+        self.units.iter().any(|u| u.consequences_gated.iter().any(|e| e.name == name))
     }
 }
 
@@ -91,11 +91,11 @@ pub fn spoof_value(name: &str) -> String {
 pub fn transfers_of(unit: &crate::planner::ExecutionUnit) -> Vec<ArtifactTransfer> {
     use crate::planner::AccessMode;
     unit.ops.iter().filter_map(|op| match op {
-        PhysicalOp::DownloadArtifact { name, path } =>
+        LogicalOp::DownloadArtifact { name, path } =>
             Some(ArtifactTransfer { name: name.to_string(), path: path.clone(), kind: TransferKind::Copy }),
-        PhysicalOp::TransferArtifact { name, path, access: AccessMode::MountReadOnly | AccessMode::MountReadWrite } =>
+        LogicalOp::TransferArtifact { name, path, access: AccessMode::MountReadOnly | AccessMode::MountReadWrite } =>
             Some(ArtifactTransfer { name: name.to_string(), path: path.clone(), kind: TransferKind::Mount }),
-        PhysicalOp::TransferArtifact { name, path, access: AccessMode::Copy } =>
+        LogicalOp::TransferArtifact { name, path, access: AccessMode::Copy } =>
             Some(ArtifactTransfer { name: name.to_string(), path: path.clone(), kind: TransferKind::Copy }),
         _ => None,
     }).collect()
@@ -104,7 +104,7 @@ pub fn transfers_of(unit: &crate::planner::ExecutionUnit) -> Vec<ArtifactTransfe
 /// Artifact names a unit produces (uploads).
 pub fn produced_artifacts(unit: &crate::planner::ExecutionUnit) -> Vec<String> {
     unit.ops.iter().filter_map(|op| match op {
-        PhysicalOp::UploadArtifact { name, .. } => Some(name.to_string()),
+        LogicalOp::UploadArtifact { name, .. } => Some(name.to_string()),
         _ => None,
     }).collect()
 }
@@ -124,10 +124,10 @@ pub trait Executor {
 pub enum Assertion {
     // Plan-level — evaluated against the plan + event with NO execution.
     ArtifactProduced { artifact: String },
-    HasEffect { effect: String },
-    EffectRequiresApproval { effect: String },
-    EffectFired { effect: String },
-    EffectGated { effect: String },
+    HasConsequence { effect: String },
+    ConsequenceRequiresApproval { effect: String },
+    ConsequenceFired { effect: String },
+    ConsequenceGated { effect: String },
     SecretSpoofed { secret: String },
     SecretWithheld { secret: String },
     TransferUsed { artifact: String, kind: TransferKind },
@@ -242,21 +242,24 @@ pub fn run_case<E: Backend + Executor>(
     let baseline = plan_for(workflow, &case.event)
         .map_err(|diags| format!("planning failed: {diags:?}"))?;
 
+    let inv_caps = crate::backends::derive_capability_profile_from_inventory(
+        workflow.inventory.as_ref()
+    );
     // Assertions are evaluated against the *optimized* plan (default level),
     // using the capabilities of whichever backend the case selects.
     let mut results = match case.backend.as_deref() {
         Some("github") => {
             let gh = GithubActionsBackend::default();
-            check_plan(&optimize_for(workflow, baseline.clone(), gh.capability_profile()), &gh, &case.assertions)
+            check_plan(&optimize_for(workflow, baseline.clone(), inv_caps), &gh, &case.assertions)
         }
         Some(other) if other != "local" =>
             return Err(format!("unknown backend '{other}' (expected github|local)")),
-        _ => check_plan(&optimize_for(workflow, baseline.clone(), backend.capability_profile()), backend, &case.assertions),
+        _ => check_plan(&optimize_for(workflow, baseline.clone(), inv_caps), backend, &case.assertions),
     };
 
     let mut run = None;
     if case.assertions.iter().any(Assertion::requires_execution) {
-        let plan = optimize_for(workflow, baseline, backend.capability_profile());
+        let plan = optimize_for(workflow, baseline, inv_caps);
         let r = backend.execute(&plan)?;
         for a in case.assertions.iter().filter(|a| a.requires_execution()) {
             results.push(evaluate_exec(a, &r));
@@ -299,8 +302,8 @@ pub fn check_plan<B: Backend>(plan: &Plan, backend: &B, assertions: &[Assertion]
 /// Aggregated plan facts, read from the event-baked plan with no execution.
 struct PlanView {
     artifacts: Vec<String>,
-    fired: Vec<EffectInfo>,
-    gated: Vec<EffectInfo>,
+    fired: Vec<ConsequenceInfo>,
+    gated: Vec<ConsequenceInfo>,
     transfers: Vec<ArtifactTransfer>,
     secrets: Vec<String>,
     secrets_available: bool,
@@ -310,8 +313,8 @@ impl PlanView {
     fn build(plan: &Plan) -> Self {
         Self {
             artifacts: plan.units.iter().flat_map(produced_artifacts).collect(),
-            fired: plan.units.iter().flat_map(|u| u.effects_fired.clone()).collect(),
-            gated: plan.units.iter().flat_map(|u| u.effects_gated.clone()).collect(),
+            fired: plan.units.iter().flat_map(|u| u.consequences_fired.clone()).collect(),
+            gated: plan.units.iter().flat_map(|u| u.consequences_gated.clone()).collect(),
             transfers: plan.units.iter().flat_map(transfers_of).collect(),
             secrets: plan.units.iter().flat_map(|u| u.secrets.iter().map(|s| s.to_string())).collect(),
             secrets_available: plan.event.secrets_available(),
@@ -327,17 +330,17 @@ fn evaluate_plan<B: Backend>(a: &Assertion, plan: &Plan, view: &PlanView, backen
     let (passed, detail) = match a {
         Assertion::ArtifactProduced { artifact } =>
             (view.artifacts.iter().any(|x| x == artifact), format!("artifact '{artifact}' not produced")),
-        Assertion::HasEffect { effect } => (
+        Assertion::HasConsequence { effect } => (
             view.fired.iter().chain(&view.gated).any(|e| e.name == effect),
             format!("no effect named '{effect}'"),
         ),
-        Assertion::EffectRequiresApproval { effect } => (
+        Assertion::ConsequenceRequiresApproval { effect } => (
             view.fired.iter().chain(&view.gated).any(|e| e.name == effect && e.requires_approval),
             format!("effect '{effect}' does not require approval"),
         ),
-        Assertion::EffectFired { effect } =>
+        Assertion::ConsequenceFired { effect } =>
             (view.fired.iter().any(|e| e.name == effect), format!("effect '{effect}' did not fire")),
-        Assertion::EffectGated { effect } =>
+        Assertion::ConsequenceGated { effect } =>
             (view.gated.iter().any(|e| e.name == effect), format!("effect '{effect}' was not gated")),
         Assertion::SecretSpoofed { secret } => (
             view.secrets_available && view.secrets.iter().any(|s| s == secret),
@@ -353,9 +356,9 @@ fn evaluate_plan<B: Backend>(a: &Assertion, plan: &Plan, view: &PlanView, backen
         }
         Assertion::ArtifactPath { artifact, path } => {
             let got = plan.units.iter().flat_map(|u| &u.ops).find_map(|op| match op {
-                PhysicalOp::UploadArtifact { name, path: Some(p) } if name == artifact => Some(p.clone()),
-                PhysicalOp::DownloadArtifact { name, path: Some(p) } if name == artifact => Some(p.clone()),
-                PhysicalOp::TransferArtifact { name, path: Some(p), .. } if name == artifact => Some(p.clone()),
+                LogicalOp::UploadArtifact { name, path: Some(p), .. } if name == artifact => Some(p.clone()),
+                LogicalOp::DownloadArtifact { name, path: Some(p) } if name == artifact => Some(p.clone()),
+                LogicalOp::TransferArtifact { name, path: Some(p), .. } if name == artifact => Some(p.clone()),
                 _ => None,
             });
             (got.as_deref() == Some(path.as_str()), format!("artifact '{artifact}' path is {got:?}, expected '{path}'"))
@@ -370,7 +373,7 @@ fn evaluate_plan<B: Backend>(a: &Assertion, plan: &Plan, view: &PlanView, backen
         }
         Assertion::MaxConcurrentDeployments { max } => {
             let n = plan.units.iter()
-                .filter(|u| u.effects_fired.iter().any(|e| e.kind == EffectKind::Deployment))
+                .filter(|u| u.consequences_fired.iter().any(|e| e.kind == ConsequenceKind::Deployment))
                 .count();
             (n <= *max, format!("{n} concurrent deployments, exceeds {max}"))
         }
@@ -420,7 +423,7 @@ fn unit_status_is(run: &TestRun, name: &str, pred: impl Fn(&UnitStatus) -> bool)
 mod tests {
     use super::*;
     use crate::backends::local::LocalBackend;
-    use crate::ir::{ArtifactType, EffectKind, WorkflowBuilder};
+    use crate::ir::{ArtifactType, ConsequenceKind, WorkflowBuilder};
 
     fn rich_wf() -> Workflow {
         let mut b = WorkflowBuilder::new("w");
@@ -430,10 +433,10 @@ mod tests {
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
         let deploy = b.shell_action("deploy", "deploy", &[bin], &[], "./d");
         b.add_secrets(build, &["TOKEN"]);
-        let rel = b.effect("release", EffectKind::PublishRelease, true);
-        b.add_effect_to(build, rel);
-        let ship = b.effect("ship", EffectKind::Deployment, false);
-        b.add_effect_to(deploy, ship);
+        let rel = b.consequence("release", ConsequenceKind::PublishRelease, true);
+        b.add_consequence_to(build, rel);
+        let ship = b.consequence("ship", ConsequenceKind::Deployment, false);
+        b.add_consequence_to(deploy, ship);
         let runner = b.actor("r", &["ubuntu-latest"], &[]);
         let gpu = b.actor("g", &["self-hosted"], &["gpu"]);
         b.constrain_actor(co, runner);
@@ -463,11 +466,11 @@ mod tests {
     #[test]
     fn effect_assertions() {
         let p = push_plan();
-        assert!(eval(&p, Assertion::HasEffect { effect: "release".into() }));
-        assert!(!eval(&p, Assertion::HasEffect { effect: "nope".into() }));
-        assert!(eval(&p, Assertion::EffectRequiresApproval { effect: "release".into() }));
-        assert!(eval(&p, Assertion::EffectGated { effect: "release".into() }));
-        assert!(eval(&p, Assertion::EffectFired { effect: "ship".into() }));
+        assert!(eval(&p, Assertion::HasConsequence { effect: "release".into() }));
+        assert!(!eval(&p, Assertion::HasConsequence { effect: "nope".into() }));
+        assert!(eval(&p, Assertion::ConsequenceRequiresApproval { effect: "release".into() }));
+        assert!(eval(&p, Assertion::ConsequenceGated { effect: "release".into() }));
+        assert!(eval(&p, Assertion::ConsequenceFired { effect: "ship".into() }));
     }
 
     #[test]
@@ -500,16 +503,15 @@ mod tests {
 
     #[test]
     fn placement_fallback_warns_on_no_mount_backend() {
-        // A shared placement that can't be mounted (github has no MOUNTS) must
-        // fall back to copy and surface a "fallback" warning — via the
-        // optimizer, not the baseline planner.
+        // Actor has no mount capability so inv_caps has no MOUNTS; the
+        // SharedVolume placement must fall back to copy and surface a warning.
         use crate::ir::{ArtifactType, PlacementStrategy, WorkflowBuilder};
         let mut b = WorkflowBuilder::new("w");
         let src = b.artifact("src", ArtifactType::SourceTree);
         let bin = b.artifact("bin", ArtifactType::Binary);
         let co = b.shell_action("checkout", "checkout", &[], &[src], "git checkout .");
         let build = b.shell_action("build", "build", &[src], &[bin], "make");
-        let actor = b.actor("m", &["self-hosted"], &["mount"]);
+        let actor = b.actor("m", &["self-hosted"], &[]);
         b.constrain_actor(co, actor);
         b.constrain_actor(build, actor);
         b.place(src, PlacementStrategy::SharedVolume { path: "/vol".into() });
@@ -550,7 +552,7 @@ mod tests {
     #[test]
     fn requires_execution_classification() {
         assert!(Assertion::RunPassed.requires_execution());
-        assert!(!Assertion::EffectGated { effect: "x".into() }.requires_execution());
+        assert!(!Assertion::ConsequenceGated { effect: "x".into() }.requires_execution());
     }
 
     #[test]
