@@ -131,9 +131,15 @@ fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<GhStep> {
                     }
                     (format!("Upload artifact {name}"), Some(m))
                 }
-                LogicalOp::DownloadArtifact { name, .. } => {
+                LogicalOp::DownloadArtifact { name, path } => {
                     let mut m = IndexMap::new();
                     m.insert("name".into(), name.to_string());
+                    // Restore into the artifact's own directory so consumers find
+                    // it where the producer wrote it (upload-artifact strips the
+                    // leading dir, so download must put it back).
+                    if let Some((dir, _)) = path.as_deref().and_then(|p| p.rsplit_once('/')) {
+                        m.insert("path".into(), dir.to_string());
+                    }
                     (format!("Download artifact {name}"), Some(m))
                 }
                 LogicalOp::RestoreCache { key } => {
