@@ -156,7 +156,9 @@ class ActionDef:
                 raise TypeError(f"consequences must be Consequence or ConsequenceKind, got {e!r}")
             consequence_ids.append(cid)
 
-        after_ids = _resolve_after(graph, after_refs)
+        # Explicit `after=` edges plus any active barrier (calls before the last
+        # barrier() must all finish before this one starts).
+        after_ids = sorted(set(_resolve_after(graph, after_refs)) | set(graph._barrier))
 
         rec: dict[str, Any] = {"name": self.name, "action": self.name}
         if artifact_inputs:

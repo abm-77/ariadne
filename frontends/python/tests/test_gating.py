@@ -38,6 +38,37 @@ def test_after_edge_is_recorded_in_tir():
     assert calls["test"].get("after") == [fmt_idx]
 
 
+def test_barrier_gates_all_prior_actions():
+    from ariadne import barrier
+
+    inv = Inventory("t").actor("r", selector=["ubuntu-latest"], capabilities=["linux"])
+
+    @action(outputs={"src": SourceTree})
+    def checkout():
+        return shell("git checkout .")
+
+    @action(outputs={})
+    def fmt(src: SourceTree):
+        return shell("fmt")
+
+    @action(outputs={"report": TestReport.file("r.xml")})
+    def test(src: SourceTree):
+        return shell("test")
+
+    @workflow(inventory=inv)
+    def ci():
+        s = checkout()
+        fmt(s)
+        barrier()
+        test(s)
+
+    tir = json.loads(ci().emit_json())
+    calls = tir["action_calls"]
+    test_call = next(c for c in calls if c["name"] == "test")
+    # `test` (after the barrier) must run after every call before it.
+    assert sorted(test_call["after"]) == [0, 1]  # checkout, fmt
+
+
 def test_after_edge_becomes_a_job_dependency():
     # Plan at -O0 (no fusion) so fmt and test stay separate jobs; the test job
     # must declare needs on the fmt job.

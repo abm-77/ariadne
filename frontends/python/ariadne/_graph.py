@@ -29,6 +29,9 @@ class WorkflowGraph:
         self._coordination: dict[str, Any] | None = None
         self._policies: dict[str, Any] = {}
         self._action_defs: list[dict[str, Any]] = []
+        # Ids of the calls present at the most recent barrier(); every later call
+        # gets ordering edges to them (nothing runs across a barrier).
+        self._barrier: list[int] = []
         self._token = None
 
     def __enter__(self) -> WorkflowGraph:
@@ -101,6 +104,10 @@ class WorkflowGraph:
 
     def _set_install_dependencies(self, enabled: bool) -> None:
         self._policies["install_dependencies"] = bool(enabled)
+
+    def _set_barrier(self) -> None:
+        # Snapshot every call so far; subsequent calls must run after them.
+        self._barrier = list(range(len(self._action_calls)))
 
     def emit_json(self, indent: int = 2) -> str:
         from ._emit import emit_json

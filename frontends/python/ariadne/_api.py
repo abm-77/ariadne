@@ -44,6 +44,14 @@ def max_parallel_jobs(n: int) -> None:
     current_graph()._set_max_parallel_jobs(n)
 
 
+def barrier() -> None:
+    """A synchronization barrier (like `__syncthreads()`): every action declared
+    before this point must finish before any action declared after it starts. No
+    data flows across it; it only orders. Use it to gate, e.g. run nothing until
+    the formatting checks pass."""
+    current_graph()._set_barrier()
+
+
 def install_dependencies(enabled: bool = True) -> None:
     """Install each job's declared tool dependencies on job start (e.g. `pip
     install maturin`). Off by default: the execution environment is assumed to

@@ -30,6 +30,7 @@ from ._api import (
     max_parallel_jobs,
     objectives,
     install_dependencies,
+    barrier,
     Placement,
     Pipeline,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "max_parallel_jobs",
     "objectives",
     "install_dependencies",
+    "barrier",
     "Placement",
     # implementation descriptors (escape hatch)
     "container",
