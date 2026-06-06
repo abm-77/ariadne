@@ -101,35 +101,23 @@ def rust_coverage(src: SourceTree):
     return coverage.measure(out="lcov.info")
 
 
-@action(
-    outputs={"ext": Binary.file("target/release/libariadne_core.so", lifetime=LIFETIME)}
-)
-def build_core_ext(src: SourceTree):
-    """Compile the PyO3 native extension (cdylib). Its compiled `.so` is the
-    payload the wheel packages, so the wheel build depends on this artifact."""
-    return build.library(package="ariadne-py", release=True)
-
-
 @action(outputs={"wheel": Wheel.glob("dist/*.whl", lifetime=LIFETIME)})
-def build_wheel(src: SourceTree, ext: Binary):
-    return build.python_wheel(
-        src=src,
-        package="ariadne",
-        manifest="crates/ariadne-py/Cargo.toml",
-        release=True,
-        out="dist",
-    )
+def build_wheel(src: SourceTree):
+    # Build from the frontend's pyproject (python-source + the ariadne_core
+    # extension) so the wheel is the importable `ariadne` package.
+    return build.python_wheel(src=src, dir="frontends/python", out="../../dist", release=True)
 
 
-@action(outputs={})
+@action(outputs={"env": Wheel})
 def install_wheel(src: SourceTree, wheel: Wheel):
-    """Install the built wheel so the python checks can import the package. Only
-    effective in the same job as its consumers, which fusion colocates."""
+    """Install the built wheel and yield the resulting environment (a marker the
+    python checks consume so they run with `ariadne` importable). The marker is
+    never transferred: the consumers are colocated with this install by fusion."""
     return package.install("dist/*.whl", using="pip")
 
 
 @action(outputs={"report": TestReport.file("py-test-results.xml", lifetime=LIFETIME)})
-def test_wheel(src: SourceTree, wheel: Wheel):
+def test_wheel(src: SourceTree, env: Wheel):
     return test.unit(paths=["frontends/python/tests/"], args=["-v"])
 
 
@@ -139,12 +127,12 @@ def python_fmt(src: SourceTree):
 
 
 @action(outputs={"docs": DocsSite.dir("frontends/python/docs", lifetime=LIFETIME)})
-def python_docs(src: SourceTree, wheel: Wheel):
+def python_docs(src: SourceTree, env: Wheel):
     return docs.generate(package="ariadne", out="frontends/python/docs")
 
 
 @action(outputs={"coverage": CoverageData.file("py-coverage.xml", lifetime=LIFETIME)})
-def python_coverage(src: SourceTree, wheel: Wheel):
+def python_coverage(src: SourceTree, env: Wheel):
     return coverage.measure(
         paths=["frontends/python/tests"], package="ariadne", out="py-coverage.xml"
     )

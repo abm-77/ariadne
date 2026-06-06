@@ -59,8 +59,8 @@ jobs:
         name: test_workspace-report
         path: test-results.xml
         retention-days: '1'
-  # fuses: python_fmt, build_core_ext, build_wheel, install_wheel, test_wheel, python_docs, python_coverage
-  fused-74497ccf:
+  # fuses: python_fmt, build_wheel, install_wheel, test_wheel, python_docs, python_coverage
+  fused-76be3f56:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -69,8 +69,6 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
     - name: Install dependencies
       run: |-
         pip install pytest
@@ -80,10 +78,8 @@ jobs:
         pip install ruff
     - name: Run python_fmt
       run: ruff format --check frontends/python
-    - name: Run build_core_ext
-      run: cargo build --lib --release --package ariadne-py
     - name: Run build_wheel
-      run: maturin build --release --manifest-path crates/ariadne-py/Cargo.toml --out dist
+      run: cd frontends/python && maturin build --release --out ../../dist
     - name: Run install_wheel
       run: pip install dist/*.whl
     - name: Run test_wheel

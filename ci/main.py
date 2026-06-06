@@ -25,7 +25,6 @@ from _lib import (
     rust_fmt,
     rust_docs,
     rust_coverage,
-    build_core_ext,
     build_wheel,
     install_wheel,
     test_wheel,
@@ -74,12 +73,11 @@ def main_ci():
     # exercised. Fusion colocates install with the checks so the package imports.
     with impls(["maturin", "ruff", "pdoc", "pytest"]):
         pfmt = python_fmt(src)
-        ext = build_core_ext(src, after=[pfmt])
-        wheel = build_wheel(src, ext)
-        inst = install_wheel(src, wheel)
-        test_wheel(src, wheel, after=[inst])
-        python_docs(src, wheel, after=[inst])
-        python_coverage(src, wheel, after=[inst])
+        wheel = build_wheel(src, after=[pfmt])
+        env = install_wheel(src, wheel)
+        test_wheel(src, env)
+        python_docs(src, env)
+        python_coverage(src, env)
 
     # Re-collect the optimizer profile from recent runs and upload it.
     refresh_profile(src)
