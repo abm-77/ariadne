@@ -4,26 +4,34 @@ on:
     branches:
     - main
 jobs:
-  refresh-profile:
+  rust-fmt:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Run refresh_profile
-      run: |-
-        cargo build --release -p loom
-        ./target/release/loom profile github --workflow main.yml --runs 20 --out profile.json
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Upload artifact refresh_profile-profile
-      uses: actions/upload-artifact@v4
-      with:
-        name: refresh_profile-profile
-        path: profile.json
-        retention-days: '1'
-  # fuses: rust_fmt, rust_docs, rust_coverage, build_loom, test_workspace
-  fused-8a420aa2:
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Run rust_fmt
+      run: cargo fmt --all -- --check
+  python-fmt:
     runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install dependencies
+      run: pip install ruff
+    - name: Run python_fmt
+      run: ruff format --check frontends/python
+  # fuses: rust_docs, rust_coverage, build_loom, test_workspace
+  fused-b389ad2b:
+    runs-on: ubuntu-latest
+    needs:
+    - python-fmt
+    - rust-fmt
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -31,8 +39,6 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
     - name: Install dependencies
       run: cargo install cargo-llvm-cov
-    - name: Run rust_fmt
-      run: cargo fmt --all -- --check
     - name: Run rust_docs
       run: cargo doc --no-deps --workspace
     - name: Upload artifact rust_docs-docs
@@ -59,9 +65,32 @@ jobs:
         name: test_workspace-report
         path: test-results.xml
         retention-days: '1'
-  # fuses: python_fmt, build_wheel, install_wheel, test_wheel, python_docs, python_coverage
-  fused-76be3f56:
+  refresh-profile:
     runs-on: ubuntu-latest
+    needs:
+    - python-fmt
+    - rust-fmt
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Run refresh_profile
+      run: |-
+        cargo build --release -p loom
+        ./target/release/loom profile github --workflow main.yml --runs 20 --out profile.json
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Upload artifact refresh_profile-profile
+      uses: actions/upload-artifact@v4
+      with:
+        name: refresh_profile-profile
+        path: profile.json
+        retention-days: '1'
+  # fuses: build_wheel, install_wheel, test_wheel, python_docs, python_coverage
+  fused-26fba87d:
+    runs-on: ubuntu-latest
+    needs:
+    - python-fmt
+    - rust-fmt
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -75,9 +104,6 @@ jobs:
         pip install pdoc
         pip install pytest-cov
         pip install maturin
-        pip install ruff
-    - name: Run python_fmt
-      run: ruff format --check frontends/python
     - name: Run build_wheel
       run: cd frontends/python && maturin build --release --out ../../dist
     - name: Run install_wheel

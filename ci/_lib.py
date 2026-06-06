@@ -88,7 +88,7 @@ def test_workspace(src: SourceTree, loom: Binary):
 
 @action(outputs={})
 def rust_fmt(src: SourceTree):
-    return fmt.check()
+    return fmt.check(using="cargo")
 
 
 @action(outputs={"docs": DocsSite.dir("target/doc", lifetime=LIFETIME)})
@@ -105,7 +105,9 @@ def rust_coverage(src: SourceTree):
 def build_wheel(src: SourceTree):
     # Build from the frontend's pyproject (python-source + the ariadne_core
     # extension) so the wheel is the importable `ariadne` package.
-    return build.python_wheel(src=src, dir="frontends/python", out="../../dist", release=True)
+    return build.python_wheel(
+        src=src, dir="frontends/python", out="../../dist", release=True
+    )
 
 
 @action(outputs={"env": Wheel})
@@ -123,7 +125,7 @@ def test_wheel(src: SourceTree, env: Wheel):
 
 @action(outputs={})
 def python_fmt(src: SourceTree):
-    return fmt.check(paths=["frontends/python"])
+    return fmt.check(paths=["frontends/python"], using="ruff")
 
 
 @action(outputs={"docs": DocsSite.dir("frontends/python/docs", lifetime=LIFETIME)})

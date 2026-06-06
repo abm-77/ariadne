@@ -33,7 +33,15 @@ from _lib import (
     python_coverage,
     refresh_profile,
 )
-from ariadne import workflow, Pipeline, on, impls, install_dependencies, objectives
+from ariadne import (
+    workflow,
+    Pipeline,
+    on,
+    impls,
+    install_dependencies,
+    objectives,
+    barrier,
+)
 from ariadne.testing import test_case, expect
 
 PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "profile.json")
@@ -61,19 +69,24 @@ def main_ci():
     objectives("dollar_cost", "critical_path")
     src = checkout()
 
-    # Rust: formatting gates build/test/docs/coverage; fusion groups them.
-    with impls(["cargo"]):
-        rfmt = rust_fmt(src)
-        loom = build_loom(src, after=[rfmt])
-        test_workspace(src, loom)
-        rust_docs(src, after=[rfmt])
-        rust_coverage(src, after=[rfmt])
+    # Formatting checks first; the barrier gates everything below on them, so no
+    # build/test runs until the tree is formatted.
+    rust_fmt(src)
+    python_fmt(src)
+    barrier()
 
-    # Python: formatting gates everything; the wheel is built, installed, then
-    # exercised. Fusion colocates install with the checks so the package imports.
+    # Rust: fusion groups build/test/docs/coverage onto one runner.
+    with impls(["cargo"]):
+        loom = build_loom(src)
+        test_workspace(src, loom)
+        rust_docs(src)
+        rust_coverage(src)
+
+    # Python: build the wheel, install it, then exercise it. The checks take the
+    # installed environment as input (so `ariadne` imports); fusion colocates the
+    # install with them.
     with impls(["maturin", "ruff", "pdoc", "pytest"]):
-        pfmt = python_fmt(src)
-        wheel = build_wheel(src, after=[pfmt])
+        wheel = build_wheel(src)
         env = install_wheel(src, wheel)
         test_wheel(src, env)
         python_docs(src, env)
