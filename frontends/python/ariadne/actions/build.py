@@ -32,14 +32,17 @@ def python_wheel(
     src: Any = None,
     package: str | None = None,
     manifest: str | None = None,
+    dir: str | None = None,
     release: bool = True,
     out: str = "dist",
 ) -> SemanticImpl:
-    """Build a Python wheel."""
+    """Build a Python wheel. `dir` builds from a project directory (its pyproject
+    decides packaging); otherwise the crate at `manifest` is built."""
     return semantic(
         "build.python_wheel",
         package=package,
         manifest=manifest,
+        dir=dir,
         release=release,
         out=out,
     )

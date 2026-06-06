@@ -351,6 +351,9 @@ pub(crate) fn local(parts: Vec<String>) -> LoweringBody {
     }
 }
 
+/// Run inside a container image. No built-in pack uses this today; it remains
+/// for lowering authors (and is exercised by tests).
+#[cfg(test)]
 pub(crate) fn container(image: &str, parts: Vec<String>) -> LoweringBody {
     LoweringBody::ContainerExec {
         image: image.to_string(),

@@ -1,4 +1,4 @@
-use super::{Registry, arg_flag, arg_str, container, def, local};
+use super::{Registry, arg_flag, arg_str, def, local};
 
 /// Build lowerings: binaries, libraries, wheels, container images, docs.
 pub fn register(r: &mut Registry) {
@@ -32,7 +32,15 @@ pub fn register(r: &mut Registry) {
             "build.python_wheel",
             "maturin",
             |a| {
-                let mut p = vec!["maturin".into(), "build".into()];
+                let mut p: Vec<String> = Vec::new();
+                // `dir` runs maturin from a project directory (its pyproject
+                // decides packaging, e.g. python-source); otherwise build the
+                // crate at `manifest`.
+                if let Some(d) = arg_str(a, "dir") {
+                    p.push(format!("cd {d} &&"));
+                }
+                p.push("maturin".into());
+                p.push("build".into());
                 if arg_flag(a, "release") {
                     p.push("--release".into());
                 }
@@ -42,7 +50,7 @@ pub fn register(r: &mut Registry) {
                 }
                 p.push("--out".into());
                 p.push(arg_str(a, "out").unwrap_or_else(|| "dist".into()));
-                container("ghcr.io/pyo3/maturin:latest", p)
+                local(p)
             },
         )
         .with_deps(&["maturin"]),
