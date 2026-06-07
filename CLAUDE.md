@@ -42,6 +42,29 @@ Backends own emission.
 
 Thread IR is the boundary between frontends and Ariadne.
 
+## Logical Op Model
+
+Every operation in a plan has one uniform identity: a `dialect.action` (the
+logical op), specified to an implementation as `dialect.action.impl` (the
+specified op), then lowered to a backend physical step. Two selection phases on
+one shared engine (`select.rs`): implementation selection (`lowering/`, plan-time,
+backend-agnostic) then instruction selection (each backend's `Catalogue`,
+emit-time). Instruction selection keys on `(action, implementation)`.
+
+- `LogicalOp::SemanticOp { action, implementation, label, args, fallback, env }`
+  is the user-domain compute carrier (build/test/fmt/scm.checkout/package.publish/...).
+- Orchestration primitives are the `ci.*` dialect, kept as typed `LogicalOp`
+  variants (`UploadArtifact`, `DownloadArtifact`, `TransferArtifact`, cache,
+  approval) so optimizer rewrites stay exhaustive. `RunShell` is the `shell.run`
+  escape hatch.
+- Every op answers `action()` / `implementation()`; do not reintroduce per-op
+  matcher special-casing. A SemanticOp always carries a shell `fallback`; a
+  backend may upgrade it to a native step (`uses:`) when an `impl.<id>` capability
+  is present, else the `AnySemantic` fallback runs the shell. This is what keeps
+  a legal plan always available (the correctness invariant).
+- Never bake a tool command into the IR or emit a backend-specific step at plan
+  time. Add new tools as lowerings, new native steps as backend instructions.
+
 ## Correctness Invariant
 
 Ariadne must always produce a correct plan if one exists.
@@ -70,21 +93,28 @@ ariadne/            (root lib crate; module per phase)
     ir.rs           semantic IR types + WorkflowBuilder (source of truth)
     proto.rs        TIR serialization: prost wire types + serde JSON codec
     diagnostics.rs
+    select.rs       shared selection substrate (Capability, Candidate, Registry, resolve)
     validate.rs
-    planner.rs
+    lowering/       implementation selection (plan-time): semantic action -> impl
+    planner.rs      Plan + LogicalOp (SemanticOp + ci.* ops); runs lowering selection
+    cost.rs profile.rs analysis.rs optimize/   optional optimization
     backends/
       mod.rs        Backend trait, Catalogue, Selector, instruction selection
       renderers.rs  backend-agnostic YAML/Bash renderers
-      github/       GitHub Actions backend
+      github/       GitHub Actions backend (+ instructions.rs catalogue)
       local/        local Podman backend + executor + assertions (loom test)
 crates/
   loom/             CLI binary over TIR (depends on ariadne)
+  ariadne-py/       PyO3 extension; builds as module ariadne.ariadne_core
+frontends/
+  python/ariadne/   Python authoring frontend (semantic actions + Inventory)
 ```
 
 Keep the logical layering even though it is one crate — modules flow inward to
-outward: `ir -> diagnostics -> validate -> planner -> backends`, with `proto`
-beside `ir`. Do not let `ir` depend on planner, backends, or filesystem/Docker
-code.
+outward: `ir -> diagnostics -> validate -> lowering -> planner -> backends`,
+with `proto` beside `ir` and `select` as the shared base both selection sites
+(lowering, backends) stand on. Do not let `ir` depend on planner, backends, or
+filesystem/Docker code.
 
 ## TIR Serialization
 

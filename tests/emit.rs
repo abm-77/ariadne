@@ -36,12 +36,10 @@ fn build_self_checks_out() {
         "{:?}",
         build.needs
     );
-    assert!(
-        build
-            .ops
-            .iter()
-            .any(|op| matches!(op, ariadne::planner::LogicalOp::CheckoutRepo))
-    );
+    assert!(build.ops.iter().any(|op| matches!(
+        op,
+        ariadne::planner::LogicalOp::SemanticOp { action, .. } if action == "scm.checkout"
+    )));
 }
 
 #[test]

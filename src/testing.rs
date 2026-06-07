@@ -565,7 +565,7 @@ fn evaluate_plan<B: Backend>(
                 .units
                 .iter()
                 .flat_map(|u| &u.ops)
-                .find(|o| o.name() == *op)
+                .find(|o| o.action() == *op)
                 .and_then(|o| selector.select(o, &caps, &[]))
                 .map(|sel| sel.instruction.id.0.to_string());
             (
@@ -769,8 +769,8 @@ mod tests {
         assert!(eval(
             &push_plan(),
             Assertion::SelectedInstruction {
-                op: "CheckoutRepo".into(),
-                instruction: "local.checkout.git".into()
+                op: "scm.checkout".into(),
+                instruction: "local.semantic.fallback".into()
             }
         ));
     }
@@ -819,8 +819,8 @@ mod tests {
             event: EventContext::default(),
             backend: Some("github".into()),
             assertions: vec![Assertion::SelectedInstruction {
-                op: "CheckoutRepo".into(),
-                instruction: "github.checkout.default".into(),
+                op: "scm.checkout".into(),
+                instruction: "github.checkout.native".into(),
             }],
         };
         let report = run_case(&rich_wf(), &case, &backend).unwrap();

@@ -19,7 +19,6 @@ pub fn register(r: &mut Registry) {
                 args.insert("repository".into(), repo);
             }
             LoweringBody::Native {
-                id: "package.publish".into(),
                 args,
                 fallback: format!("twine upload {dist}"),
             }

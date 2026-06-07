@@ -83,7 +83,19 @@ fn signature(u: &ExecutionUnit) -> Vec<String> {
     sig.sort();
     for op in &u.ops {
         match op {
-            LogicalOp::CheckoutRepo => sig.push("C".into()),
+            LogicalOp::SemanticOp {
+                action,
+                implementation,
+                args,
+                fallback,
+                ..
+            } => {
+                let a: Vec<String> = args.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                sig.push(format!(
+                    "S:{action}.{implementation}:{}:{fallback}",
+                    a.join(",")
+                ));
+            }
             LogicalOp::RunShell { script, env, .. } => {
                 let mut e: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 e.sort();
@@ -96,10 +108,6 @@ fn signature(u: &ExecutionUnit) -> Vec<String> {
             LogicalOp::RestoreCache { key } => sig.push(format!("RC:{key}")),
             LogicalOp::SaveCache { key } => sig.push(format!("SC:{key}")),
             LogicalOp::RequestApproval { reason } => sig.push(format!("AP:{reason}")),
-            LogicalOp::Native { id, args, fallback } => {
-                let a: Vec<String> = args.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                sig.push(format!("NA:{id}:{}:{fallback}", a.join(",")));
-            }
             LogicalOp::UploadArtifact { .. } => {}
         }
     }

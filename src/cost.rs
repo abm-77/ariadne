@@ -144,24 +144,33 @@ fn makespan(plan: &Plan, durs: &HashMap<Ustr, f64>) -> f64 {
     finish.into_values().fold(0.0, f64::max)
 }
 
-/// A unit's compute time: the sum of its shell ops' durations (each `RunShell`
-/// is labelled with its action name, so a fused unit holding several actions
-/// costs the sum of their work, not a single lookup). Units with no shell op
-/// (e.g. a native checkout) fall back to the action-name duration. Missing
-/// measurements use a constant so plans stay comparable.
+/// A unit's compute time: the sum of its work ops' durations (each compute op is
+/// labelled with its action name, so a fused unit holding several actions costs
+/// the sum of their work, not a single lookup). Work ops are real `SemanticOp`s
+/// (build/test/...) and raw shell; `scm.checkout` is input acquisition, not
+/// compute, so it is excluded like a download. Units with no work op fall back
+/// to the action-name duration. Missing measurements use a constant so plans
+/// stay comparable.
 fn unit_compute_secs(unit: &crate::planner::ExecutionUnit, profile: &Profile) -> f64 {
-    let mut shell_secs = 0.0;
-    let mut shell_ops = 0u32;
+    let mut work_secs = 0.0;
+    let mut work_ops = 0u32;
     for op in &unit.ops {
-        if let LogicalOp::RunShell { label, .. } = op {
-            shell_secs += profile
+        let label = match op {
+            LogicalOp::RunShell { label, .. } => Some(label),
+            LogicalOp::SemanticOp { action, label, .. } if action.as_str() != "scm.checkout" => {
+                Some(label)
+            }
+            _ => None,
+        };
+        if let Some(label) = label {
+            work_secs += profile
                 .action_duration(label.as_str())
                 .unwrap_or(DEFAULT_ACTION_SECS);
-            shell_ops += 1;
+            work_ops += 1;
         }
     }
-    if shell_ops > 0 {
-        shell_secs
+    if work_ops > 0 {
+        work_secs
     } else {
         profile
             .action_duration(unit.action_name.as_str())

@@ -126,15 +126,19 @@ fn shared_artifacts(producer: &ExecutionUnit, consumer: &ExecutionUnit) -> HashS
         .collect()
 }
 
-/// Both halves of a fused unit may pull the same input (e.g. each downloaded
+/// Both halves of a fused unit may pull the same input (e.g. each checked out
 /// `src`). Input acquisition is idempotent within one runner, so keep only the
-/// first of each identical checkout/download/transfer. Real work (shell, native,
-/// upload, cache) is never deduplicated.
+/// first of each identical checkout/download/transfer. Real work (semantic
+/// compute, shell, upload, cache) is never deduplicated.
 pub(super) fn dedup_input_pulls(ops: &mut Vec<LogicalOp>) {
     let mut seen: HashSet<String> = HashSet::new();
     ops.retain(|op| {
         let key = match op {
-            LogicalOp::CheckoutRepo => "checkout".to_string(),
+            // Only checkout is an idempotent input pull; other SemanticOps are
+            // real work and must never be deduplicated.
+            LogicalOp::SemanticOp { action, .. } if action == "scm.checkout" => {
+                "checkout".to_string()
+            }
             LogicalOp::DownloadArtifact { name, path } => format!("dl:{name}:{path:?}"),
             LogicalOp::TransferArtifact { name, path, access } => {
                 format!("tr:{name}:{path:?}:{access:?}")

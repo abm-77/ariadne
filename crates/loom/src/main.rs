@@ -541,7 +541,12 @@ fn indent(s: &str) -> String {
 fn op_label(op: &ariadne::planner::LogicalOp) -> String {
     use ariadne::planner::{AccessMode, LogicalOp};
     match op {
-        LogicalOp::CheckoutRepo => "checkout repository".to_string(),
+        LogicalOp::SemanticOp {
+            action,
+            implementation,
+            fallback,
+            ..
+        } => format!("{action}.{implementation}: {fallback}"),
         LogicalOp::RunShell { label, .. } => format!("run shell: {label}"),
         LogicalOp::UploadArtifact { name, .. } => format!("upload artifact '{name}' (copy)"),
         LogicalOp::DownloadArtifact { name, .. } => {
@@ -561,9 +566,6 @@ fn op_label(op: &ariadne::planner::LogicalOp) -> String {
         LogicalOp::RestoreCache { key } => format!("restore cache '{key}'"),
         LogicalOp::SaveCache { key } => format!("save cache '{key}'"),
         LogicalOp::RequestApproval { reason } => format!("request approval: {reason}"),
-        LogicalOp::Native { id, fallback, .. } => {
-            format!("{id} (native step, fallback: {fallback})")
-        }
     }
 }
 

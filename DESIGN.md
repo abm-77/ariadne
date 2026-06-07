@@ -315,54 +315,75 @@ Lowering author   teaches Ariadne how an implementation realizes an action
 
 ---
 
-## Selection Model: Lowerings and Instructions
+## Selection Model: from `dialect.action` to a native step
 
-Going from semantic intent to backend config is two selection phases of one pattern. Both are
-*capability-gated, ranked, explainable rule resolution* over a registry, and both run on a
-single shared engine (`src/select.rs`): `Capability`, `Stability`, a `Candidate` trait, a
-generic `Registry<C>` (storage + by-key index), and `resolve(candidates, available, priority)`
-(filter to candidates whose required capabilities are all available, then pick the best by
-`(priority, stability)`, ties broken by registration order).
+Every operation in a plan has one uniform identity: a `dialect.action` (the *logical op*),
+specified to an implementation as `dialect.action.impl` (the *specified op*), then lowered to a
+backend physical step. Two selection phases drive this, and they are the same pattern -
+*capability-gated, ranked, explainable rule resolution* over a registry - running on one shared
+engine (`src/select.rs`): `Capability`, `Stability`, a `Candidate` trait, a generic `Registry<C>`
+(storage + by-key index), and `resolve(candidates, available, priority)` (filter to candidates
+whose required capabilities are all available, then pick the best by `(priority, stability)`,
+ties broken by registration order).
 
 ```text
-Semantic action
+Logical op        dialect.action            e.g. build.binary, scm.checkout, ci.artifact.upload
     ↓   implementation selection  (plan-time, backend-agnostic)   src/lowering/
-Portable LogicalOp
+Specified op      dialect.action.impl       e.g. build.binary.cargo, scm.checkout.git
     ↓   instruction selection     (emit-time, backend-aware)      src/backends/<b>/instructions.rs
-Native backend step
+Native step       run: / uses:
 ```
+
+Dialects: `scm` / `build` / `test` / `fmt` / `docs` / `coverage` / `scan` / `sign` / `package` /
+`forge` are user-domain; **`ci` is the orchestration dialect** (`ci.artifact.upload` /
+`download` / `transfer`, `ci.cache.restore` / `save`, `ci.approval`). The raw `shell()` escape
+hatch is `shell.run`. There is no special-cased op kind: build steps and orchestration steps go
+through the same selection.
 
 ### Implementation selection (lowering)
 
 A `LoweringDef { id, action, implementation, requires, stability, build }` teaches Ariadne how
 one implementation realizes one semantic action; its `build` produces a structured, inspectable
-`LoweringBody` (no DSL). Lowerings live in an extensible `Registry` (`src/lowering/`, one pack
-module per class: scm, build, test, scan, sign, package, forge). Built-in packs register
-defaults; callers and future distributable packs may register more.
+`LoweringBody` (no DSL), which flattens to a `Specification { args, fallback }` - native-step
+args (usually empty) plus a shell command any backend can run. Lowerings live in an extensible
+`Registry` (`src/lowering/`, one pack module per class). Built-in packs register defaults; callers
+and future distributable packs may register more.
 
 Selection consults the inventory: `deny` excludes; `prefer` then `use` then undeclared-default
-sets the rank (so a silent inventory still yields a working default, preserving correctness).
-The result is a **portable** `LogicalOp` - the plan never contains a backend-specific step.
+sets the rank (so a silent inventory still yields a working default, preserving correctness). The
+same `test.unit()` becomes `test.unit.cargo` under `use("cargo")` and `test.unit.pytest` under
+`use("pytest")`. Same intent, different specified op, decided here.
 
-The same `test.unit()` lowers to `cargo test` under an inventory with `use("cargo")` and to
-`pytest` under one with `use("pytest")`. Same intent, different lowering, decided here.
+### The logical op (`LogicalOp`)
+
+The planner emits `LogicalOp`s. Identity is uniform - every op answers `action()` and
+`implementation()` - but payloads stay typed so the optimizer's structural rewrites remain
+exhaustive (and `AccessMode` stays an enum). The user-domain compute carrier is
+`SemanticOp { action, implementation, label, args, fallback, env }` (build / test / fmt /
+`scm.checkout` / `package.publish` / ...); the `ci.*` orchestration primitives are typed variants
+(`UploadArtifact`, `DownloadArtifact`, `TransferArtifact`, cache, approval), and `RunShell` is the
+escape hatch. A transfer's `implementation()` is its access mode (`copy`, `mount-ro`, ...). The
+plan never contains a backend-specific step.
 
 ### Instruction selection (emission)
 
-Each backend owns a `Catalogue` of `Instruction`s. The `Selector` matches a `LogicalOp` against
-it (by op name, plus capability gates) and renders the native step: `CheckoutRepo` becomes
-`uses: actions/checkout@v4` on GitHub, `git checkout` on local.
+Each backend owns a `Catalogue` of `Instruction`s, each matching on `(action, implementation)`.
+The `Selector` resolves a `LogicalOp` against it (capability-gated, cheapest wins) and renders the
+native step: `scm.checkout` becomes `uses: actions/checkout@v4` on GitHub or `git checkout .` on
+local; `ci.artifact.upload` becomes `actions/upload-artifact@v4`; `build.binary.cargo` becomes
+`run: cargo build ...`.
 
 ### Native steps and the portability invariant
 
-Some realizations are backend-specific (a GitHub `uses:` action like
-`pypa/gh-action-pypi-publish`). These are never chosen at plan time. A lowering emits a portable
-`LogicalOp::Native { id, args, fallback }` carrying a shell `fallback`; the backend catalogue may
-*upgrade* it to a native step when the inventory permits (inventory implementations surface as
-`impl.<id>` capabilities; the upgrade entry requires that capability), and any backend lacking
-the upgrade runs the fallback. Checkout is just an instance: fallback `git checkout .`, upgraded
-to `actions/checkout@v4` on GitHub. This keeps the plan portable and a legal plan always
-available, exactly as the correctness invariant requires.
+Native-with-shell-fallback is the universal model. Every `SemanticOp` carries a shell `fallback`
+that *any* backend can run; the backend catalogue may *upgrade* it to a native step when the
+inventory permits (inventory implementations surface as `impl.<id>` capabilities; the upgrade
+entry requires that capability). A backend without a concrete instruction for an op falls through
+to its `AnySemantic` fallback, which runs the shell command. So `scm.checkout` upgrades to
+`actions/checkout@v4`, `package.publish` to `pypa/gh-action-pypi-publish` (gated on the inventory
+capability), and `build.binary.cargo` - which has no native action - simply runs `cargo build`.
+This keeps the plan portable and a legal plan always available, exactly as the correctness
+invariant requires.
 
 The two containers are the same type: `lowering::Registry = select::Registry<LoweringDef>` and
 `backends::Catalogue = select::Registry<Instruction>`. The phases differ only in what
@@ -1109,7 +1130,7 @@ ariadne/                 root lib crate
     lowering/            implementation selection (plan-time, backend-agnostic)
       mod.rs               Registry = select::Registry<LoweringDef>, LoweringBody, select
       scm.rs build.rs test.rs scan.rs sign.rs package.rs forge.rs   built-in packs
-    planner.rs           Plan + LogicalOp (incl. Native); runs lowering selection
+    planner.rs           Plan + LogicalOp (SemanticOp + ci.* ops); runs lowering selection
     cost.rs profile.rs analysis.rs optimize/   optional optimization
     backends/
       mod.rs             Backend trait; Catalogue = select::Registry<Instruction>; Selector

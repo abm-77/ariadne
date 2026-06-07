@@ -149,8 +149,8 @@
     },
     {
       "assert": "selected_instruction",
-      "op": "CheckoutRepo",
-      "instruction": "local.checkout.git"
+      "op": "scm.checkout",
+      "instruction": "local.semantic.fallback"
     },
     {
       "assert": "transfer_used",

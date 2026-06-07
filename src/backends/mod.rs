@@ -229,41 +229,61 @@ impl<S: AsRef<str>> From<S> for InstructionId {
     }
 }
 
+/// What `(action, implementation)` an instruction matches. Instruction
+/// selection keys uniformly on the op's `action()`/`implementation()`.
+/// `AnySemantic` is the universal shell fallback for `SemanticOp`s that have no
+/// concrete native instruction; orchestration ops always have one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpMatcher {
-    pub op: String,
-    #[serde(default)]
-    pub extra: HashMap<String, String>,
+pub enum OpMatcher {
+    Action {
+        action: String,
+        #[serde(default)]
+        implementation: Option<String>,
+    },
+    AnySemantic,
 }
 
 impl OpMatcher {
-    pub fn for_op(op: &str) -> Self {
-        Self {
-            op: op.into(),
-            extra: HashMap::new(),
+    pub fn for_action(action: &str) -> Self {
+        OpMatcher::Action {
+            action: action.into(),
+            implementation: None,
+        }
+    }
+
+    pub fn for_action_impl(action: &str, implementation: &str) -> Self {
+        OpMatcher::Action {
+            action: action.into(),
+            implementation: Some(implementation.into()),
+        }
+    }
+
+    pub fn any_semantic() -> Self {
+        OpMatcher::AnySemantic
+    }
+
+    /// The registry bucket this matcher registers under (bookkeeping only;
+    /// selection matches by iterating all instructions).
+    fn key(&self) -> &str {
+        match self {
+            OpMatcher::Action { action, .. } => action,
+            OpMatcher::AnySemantic => "*semantic",
         }
     }
 
     pub fn matches(&self, op: &LogicalOp) -> bool {
-        if op.name() != self.op.as_str() {
-            return false;
-        }
-        for (key, val) in &self.extra {
-            match (key.as_str(), op) {
-                ("access", LogicalOp::TransferArtifact { access, .. }) => {
-                    if transfer_access_name(access) != val.as_str() {
-                        return false;
-                    }
-                }
-                ("native_id", LogicalOp::Native { id, .. }) => {
-                    if id.as_str() != val.as_str() {
-                        return false;
-                    }
-                }
-                _ => return false,
+        match self {
+            OpMatcher::Action {
+                action,
+                implementation,
+            } => {
+                op.action() == action
+                    && implementation
+                        .as_deref()
+                        .is_none_or(|i| op.implementation() == i)
             }
+            OpMatcher::AnySemantic => op.is_semantic(),
         }
-        true
     }
 }
 
@@ -287,7 +307,7 @@ pub struct Instruction {
 
 impl Candidate for Instruction {
     fn key(&self) -> &str {
-        &self.matcher.op
+        self.matcher.key()
     }
     fn requires(&self) -> &[Capability] {
         &self.requires
@@ -342,9 +362,7 @@ impl<'a> Selector<'a> {
         backend_caps: &[Capability],
         actor_caps: &[Capability],
     ) -> Option<SelectedInstruction<'_>> {
-        let op_name = op.name();
-
-        if let Some(pinned) = self.policy.instruction_pins.get(op_name)
+        if let Some(pinned) = self.policy.instruction_pins.get(op.action())
             && let Some(instr) = self.catalogue.all().iter().find(|i| &i.id == pinned)
         {
             return Some(SelectedInstruction {
@@ -354,9 +372,10 @@ impl<'a> Selector<'a> {
         }
 
         // Matching and policy exclusion are instruction-selection-specific and
-        // stay here; gathering by key, the hard-requirement filter, and the
-        // cost/stability ranking are the shared engine (`select`). Cost is this
-        // layer's priority.
+        // stay here; the hard-requirement filter and cost/stability ranking are
+        // the shared engine (`select`). Cost is this layer's priority. The
+        // catalogue is small, so we match by scanning rather than keyed lookup
+        // (the `AnySemantic` fallback has no single action key to index under).
         let available: Vec<Capability> = backend_caps
             .iter()
             .chain(actor_caps.iter())
@@ -364,7 +383,8 @@ impl<'a> Selector<'a> {
             .collect();
         let candidates = self
             .catalogue
-            .candidates(op_name)
+            .all()
+            .iter()
             .filter(|i| i.backend == self.backend)
             .filter(|i| i.matcher.matches(op))
             .filter(|i| {
@@ -423,7 +443,22 @@ pub fn plan_to_request(plan: &Plan) -> BackendPlanRequest {
 
 fn logical_op_to_json(op: &LogicalOp) -> JsonValue {
     match op {
-        LogicalOp::CheckoutRepo => json!({"kind": "CheckoutRepo"}),
+        LogicalOp::SemanticOp {
+            action,
+            implementation,
+            label,
+            args,
+            fallback,
+            env,
+        } => json!({
+            "kind": "SemanticOp",
+            "action": action.as_str(),
+            "implementation": implementation.as_str(),
+            "label": label.as_str(),
+            "args": args,
+            "fallback": fallback,
+            "env": env
+        }),
         LogicalOp::RunShell { label, script, env } => json!({
             "kind": "RunShell",
             "label": label.as_str(),
@@ -456,12 +491,6 @@ fn logical_op_to_json(op: &LogicalOp) -> JsonValue {
         LogicalOp::RequestApproval { reason } => {
             json!({"kind": "RequestApproval", "reason": reason})
         }
-        LogicalOp::Native { id, args, fallback } => json!({
-            "kind": "Native",
-            "id": id.as_str(),
-            "args": args,
-            "fallback": fallback
-        }),
     }
 }
 
@@ -575,7 +604,7 @@ mod tests {
 
     fn make_instr(
         id: &str,
-        op: &str,
+        action: &str,
         backend: BackendKind,
         requires: Vec<Capability>,
         cost: u32,
@@ -585,7 +614,7 @@ mod tests {
             backend,
             provides: vec![],
             requires,
-            matcher: OpMatcher::for_op(op),
+            matcher: OpMatcher::for_action(action),
             cost: CostHint {
                 fixed: cost,
                 per_mb: 0,
@@ -596,18 +625,29 @@ mod tests {
         }
     }
 
+    fn checkout() -> LogicalOp {
+        LogicalOp::SemanticOp {
+            action: "scm.checkout".into(),
+            implementation: "git".into(),
+            label: "checkout".into(),
+            args: Default::default(),
+            fallback: "git checkout .".into(),
+            env: Default::default(),
+        }
+    }
+
     #[test]
     fn selects_matching_instruction() {
         let cat = Catalogue::from_items(vec![make_instr(
             "github.checkout",
-            "CheckoutRepo",
+            "scm.checkout",
             BackendKind::Github,
             vec![Capability::new("github.action_calls.uses")],
             5,
         )]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
         let caps = vec![Capability::new("github.action_calls.uses")];
-        let result = sel.select(&LogicalOp::CheckoutRepo, &caps, &[]);
+        let result = sel.select(&checkout(), &caps, &[]);
         assert!(result.is_some());
         assert_eq!(result.unwrap().instruction.id.0, "github.checkout");
     }
@@ -616,45 +656,41 @@ mod tests {
     fn filters_by_missing_capability() {
         let cat = Catalogue::from_items(vec![make_instr(
             "github.checkout",
-            "CheckoutRepo",
+            "scm.checkout",
             BackendKind::Github,
             vec![Capability::new("github.action_calls.uses")],
             5,
         )]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
+        assert!(sel.select(&checkout(), &[], &[]).is_none());
     }
 
     #[test]
     fn filters_by_backend_kind() {
         let cat = Catalogue::from_items(vec![make_instr(
             "local.checkout",
-            "CheckoutRepo",
+            "scm.checkout",
             BackendKind::Local,
             vec![],
             3,
         )]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
-        assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
+        assert!(sel.select(&checkout(), &[], &[]).is_none());
     }
 
     #[test]
     fn policy_pin_overrides_ranking() {
         let cat = Catalogue::from_items(vec![
-            make_instr("a", "CheckoutRepo", BackendKind::Github, vec![], 5),
-            make_instr("b", "CheckoutRepo", BackendKind::Github, vec![], 1),
+            make_instr("a", "scm.checkout", BackendKind::Github, vec![], 5),
+            make_instr("b", "scm.checkout", BackendKind::Github, vec![], 1),
         ]);
         let mut policy = Policy::default();
         policy
             .instruction_pins
-            .insert("CheckoutRepo".into(), InstructionId("a".into()));
+            .insert("scm.checkout".into(), InstructionId("a".into()));
         let sel = Selector::new(&cat, policy, BackendKind::Github);
         assert_eq!(
-            sel.select(&LogicalOp::CheckoutRepo, &[], &[])
-                .unwrap()
-                .instruction
-                .id
-                .0,
+            sel.select(&checkout(), &[], &[]).unwrap().instruction.id.0,
             "a"
         );
     }
@@ -662,8 +698,8 @@ mod tests {
     #[test]
     fn ranks_by_cost_ascending() {
         let cat = Catalogue::from_items(vec![
-            make_instr("expensive", "RunShell", BackendKind::Github, vec![], 10),
-            make_instr("cheap", "RunShell", BackendKind::Github, vec![], 1),
+            make_instr("expensive", "shell.run", BackendKind::Github, vec![], 10),
+            make_instr("cheap", "shell.run", BackendKind::Github, vec![], 1),
         ]);
         let sel = Selector::new(&cat, Policy::default(), BackendKind::Github);
         let op = LogicalOp::RunShell {
@@ -678,7 +714,7 @@ mod tests {
     fn allowlist_rejects_unlisted_instruction() {
         let cat = Catalogue::from_items(vec![make_instr(
             "github.checkout",
-            "CheckoutRepo",
+            "scm.checkout",
             BackendKind::Github,
             vec![],
             5,
@@ -688,26 +724,25 @@ mod tests {
             ..Default::default()
         };
         let sel = Selector::new(&cat, policy, BackendKind::Github);
-        assert!(sel.select(&LogicalOp::CheckoutRepo, &[], &[]).is_none());
+        assert!(sel.select(&checkout(), &[], &[]).is_none());
     }
 
     #[test]
-    fn catalogue_indexes_instructions_by_op() {
+    fn catalogue_indexes_instructions_by_action() {
         let cat = Catalogue::from_items(vec![
-            make_instr("a", "RunShell", BackendKind::Github, vec![], 1),
-            make_instr("b", "RunShell", BackendKind::Local, vec![], 1),
-            make_instr("c", "CheckoutRepo", BackendKind::Github, vec![], 1),
+            make_instr("a", "shell.run", BackendKind::Github, vec![], 1),
+            make_instr("b", "shell.run", BackendKind::Local, vec![], 1),
+            make_instr("c", "scm.checkout", BackendKind::Github, vec![], 1),
         ]);
-        assert_eq!(cat.candidates("RunShell").count(), 2);
-        assert_eq!(cat.candidates("CheckoutRepo").count(), 1);
+        assert_eq!(cat.candidates("shell.run").count(), 2);
+        assert_eq!(cat.candidates("scm.checkout").count(), 1);
         assert_eq!(cat.candidates("Nope").count(), 0);
         assert_eq!(cat.all().len(), 3);
     }
 
     #[test]
-    fn op_matcher_extra_predicate_access() {
-        let mut matcher = OpMatcher::for_op("TransferArtifact");
-        matcher.extra.insert("access".into(), "Copy".into());
+    fn op_matcher_implementation_predicate_access() {
+        let matcher = OpMatcher::for_action_impl("ci.artifact.transfer", "Copy");
         let copy_op = LogicalOp::TransferArtifact {
             name: "x".into(),
             path: None,

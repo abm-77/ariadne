@@ -68,11 +68,28 @@ pub fn partition_consequences(
     (fired, gated)
 }
 
-/// Backend-neutral physical operations.
-/// The planner emits these; instruction selection maps them to backend-specific steps.
+/// Backend-neutral logical operations. Every op is a `dialect.action` specified
+/// to an implementation (`dialect.action.impl`); instruction selection keys on
+/// `(action, implementation)` to pick a backend physical step. `SemanticOp` is
+/// the user-domain compute carrier (build/test/scm/...); the typed variants are
+/// the `ci.*` orchestration dialect plus the `shell.run` escape hatch. Identity
+/// is uniform (every op answers `action`/`implementation`); payloads stay typed
+/// so the optimizer's structural rewrites remain exhaustive and `AccessMode`
+/// stays an enum.
 #[derive(Debug, Clone)]
 pub enum LogicalOp {
-    CheckoutRepo,
+    /// A semantic action specified to an implementation, carrying native-step
+    /// args (usually empty), a shell `fallback` any backend can run, and env.
+    /// `scm.checkout`/`build.binary`/`package.publish`/... all flow through here.
+    SemanticOp {
+        action: Ustr,
+        implementation: Ustr,
+        label: Ustr,
+        args: BTreeMap<String, String>,
+        fallback: String,
+        env: HashMap<String, String>,
+    },
+    /// The raw `shell()` escape hatch: a script with no semantic identity.
     RunShell {
         label: Ustr,
         script: String,
@@ -101,31 +118,99 @@ pub enum LogicalOp {
     RequestApproval {
         reason: String,
     },
-    /// A portable semantic instruction. Backends may upgrade it to a native
-    /// step (e.g. a GitHub `uses:` action) via their catalogue when the
-    /// inventory permits; otherwise `fallback` is run as a shell command. This
-    /// keeps the plan backend-agnostic while allowing emit-time native steps.
-    Native {
-        id: Ustr,
-        args: BTreeMap<String, String>,
-        fallback: String,
-    },
 }
 
 impl LogicalOp {
-    /// Stable variant name, used for instruction matching and selection.
-    pub fn name(&self) -> &'static str {
+    /// The `dialect.action` identity instruction selection matches on. Stable
+    /// across backends; the `ci.*` dialect names the orchestration primitives.
+    pub fn action(&self) -> &str {
         match self {
-            LogicalOp::CheckoutRepo => "CheckoutRepo",
-            LogicalOp::RunShell { .. } => "RunShell",
-            LogicalOp::UploadArtifact { .. } => "UploadArtifact",
-            LogicalOp::DownloadArtifact { .. } => "DownloadArtifact",
-            LogicalOp::TransferArtifact { .. } => "TransferArtifact",
-            LogicalOp::RestoreCache { .. } => "RestoreCache",
-            LogicalOp::SaveCache { .. } => "SaveCache",
-            LogicalOp::RequestApproval { .. } => "RequestApproval",
-            LogicalOp::Native { .. } => "Native",
+            LogicalOp::SemanticOp { action, .. } => action.as_str(),
+            LogicalOp::RunShell { .. } => "shell.run",
+            LogicalOp::UploadArtifact { .. } => "ci.artifact.upload",
+            LogicalOp::DownloadArtifact { .. } => "ci.artifact.download",
+            LogicalOp::TransferArtifact { .. } => "ci.artifact.transfer",
+            LogicalOp::RestoreCache { .. } => "ci.cache.restore",
+            LogicalOp::SaveCache { .. } => "ci.cache.save",
+            LogicalOp::RequestApproval { .. } => "ci.approval",
         }
+    }
+
+    /// The chosen implementation; together with `action` it is the specified op
+    /// (`dialect.action.impl`). A transfer's implementation is its access mode.
+    pub fn implementation(&self) -> &str {
+        match self {
+            LogicalOp::SemanticOp { implementation, .. } => implementation.as_str(),
+            LogicalOp::RunShell { .. } => "inline",
+            LogicalOp::TransferArtifact { access, .. } => transfer_access_name(access),
+            _ => "default",
+        }
+    }
+
+    /// Only the user-domain compute op needs a shell fallback at emit time; the
+    /// orchestration ops always resolve to a concrete backend instruction.
+    pub fn is_semantic(&self) -> bool {
+        matches!(self, LogicalOp::SemanticOp { .. })
+    }
+
+    pub fn upload(name: Ustr, path: Option<String>, lifetime: Option<String>) -> Self {
+        LogicalOp::UploadArtifact {
+            name,
+            path,
+            lifetime,
+        }
+    }
+
+    pub fn download(name: Ustr, path: Option<String>) -> Self {
+        LogicalOp::DownloadArtifact { name, path }
+    }
+
+    pub fn transfer(name: Ustr, path: Option<String>, access: AccessMode) -> Self {
+        LogicalOp::TransferArtifact { name, path, access }
+    }
+}
+
+/// Stable string for an access mode, used as a transfer's implementation id and
+/// in instruction matching/explain.
+pub fn transfer_access_name(access: &AccessMode) -> &'static str {
+    match access {
+        AccessMode::Copy => "Copy",
+        AccessMode::MountReadOnly => "MountReadOnly",
+        AccessMode::MountReadWrite => "MountReadWrite",
+        AccessMode::Stream => "Stream",
+        AccessMode::SameHostPath => "SameHostPath",
+        AccessMode::OciLayer => "OciLayer",
+    }
+}
+
+/// The checkout op: `scm.checkout` specified to its implementation (e.g. git).
+/// Both the planner-injected source checkout and an explicit checkout action
+/// flow through here, so checkout is a normal `scm.checkout` SemanticOp whose
+/// shell fallback (`git checkout .`) a backend may upgrade to a native step.
+fn checkout_op(
+    registry: &crate::lowering::Registry,
+    inv: Option<&ir::Inventory>,
+    caps: &[crate::select::Capability],
+) -> LogicalOp {
+    let args = crate::lowering::Args::new();
+    let (implementation, spec) =
+        match registry.select_using("scm.checkout", &args, inv, caps, None, &[]) {
+            Ok(sel) => (sel.implementation, sel.specification),
+            Err(_) => (
+                "git".to_string(),
+                crate::lowering::Specification {
+                    args: Default::default(),
+                    fallback: "git checkout .".into(),
+                },
+            ),
+        };
+    LogicalOp::SemanticOp {
+        action: Ustr::from("scm.checkout"),
+        implementation: Ustr::from(implementation.as_str()),
+        label: Ustr::from("checkout"),
+        args: spec.args,
+        fallback: spec.fallback,
+        env: Default::default(),
     }
 }
 
@@ -358,13 +443,28 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
 
         let mut ops: Vec<LogicalOp> = Vec::new();
 
+        // The actor's capabilities gate implementation selection (here and in the
+        // semantic branch below).
+        let actor_caps: Vec<crate::select::Capability> = actor_for(action, workflow)
+            .map(|a| {
+                a.capabilities
+                    .iter()
+                    .map(crate::select::Capability::new)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // A SourceTree input means "this job needs the repo": acquire it in place
-        // with a checkout step (rendered as actions/checkout on GitHub), never a
+        // with a checkout op (rendered as actions/checkout on GitHub), never a
         // download. Non-source inputs use the copy baseline (upload/download) —
         // the legal fallback the placement pass may later upgrade to a mount.
         let needs_source = action.inputs.iter().any(|&id| is_source(id));
         if needs_source {
-            ops.push(LogicalOp::CheckoutRepo);
+            ops.push(checkout_op(
+                &lowering_registry,
+                workflow.inventory.as_ref(),
+                &actor_caps,
+            ));
         }
         for &in_id in &action.inputs {
             let art = workflow.artifact(in_id);
@@ -395,19 +495,11 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
         let mut dependencies: Vec<Ustr> = Vec::new();
         let mut toolchains: Vec<Ustr> = Vec::new();
         if let Some((op, args, using, prefer)) = semantic {
-            let caps: Vec<crate::select::Capability> = actor_for(action, workflow)
-                .map(|a| {
-                    a.capabilities
-                        .iter()
-                        .map(crate::select::Capability::new)
-                        .collect()
-                })
-                .unwrap_or_default();
             match lowering_registry.select_using(
                 &op,
                 &args,
                 workflow.inventory.as_ref(),
-                &caps,
+                &actor_caps,
                 using.as_deref(),
                 &prefer,
             ) {
@@ -451,13 +543,7 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
                                 Some(&manager),
                                 &[],
                             ) {
-                                let cmd = match install.realization {
-                                    crate::lowering::Realization::Shell(c) => c,
-                                    crate::lowering::Realization::Native { fallback, .. } => {
-                                        fallback
-                                    }
-                                };
-                                dep_table.insert(tool_name.clone(), cmd);
+                                dep_table.insert(tool_name.clone(), install.specification.fallback);
                             }
                         }
                         let tool = Ustr::from(tool_name);
@@ -466,27 +552,27 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
                         }
                     }
                     dependencies.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-                    match sel.realization {
-                        crate::lowering::Realization::Shell(script) => {
-                            ops.push(LogicalOp::RunShell {
-                                label: action.name,
-                                script,
-                                env: Default::default(),
-                            })
-                        }
-                        crate::lowering::Realization::Native { id, args, fallback } => {
-                            ops.push(LogicalOp::Native {
-                                id: Ustr::from(&id),
-                                args,
-                                fallback,
-                            })
-                        }
-                    }
+                    // The specified op (`{op}.{implementation}`) carries its
+                    // native args + shell fallback to emit-time instruction
+                    // selection, which picks a native step or runs the fallback.
+                    let spec = sel.specification;
+                    ops.push(LogicalOp::SemanticOp {
+                        action: Ustr::from(op.as_str()),
+                        implementation: Ustr::from(sel.implementation.as_str()),
+                        label: action.name,
+                        args: spec.args,
+                        fallback: spec.fallback,
+                        env: Default::default(),
+                    });
                 }
                 Err(d) => return Err(vec![d]),
             }
         } else if is_checkout {
-            ops.push(LogicalOp::CheckoutRepo);
+            ops.push(checkout_op(
+                &lowering_registry,
+                workflow.inventory.as_ref(),
+                &actor_caps,
+            ));
         } else {
             // Prefer the action's own shell script; fall back to the op
             // definition's first shell-capable implementation.
@@ -772,12 +858,9 @@ mod tests {
             .iter()
             .find(|u| u.action_name == "build")
             .unwrap();
-        assert!(
-            build
-                .ops
-                .iter()
-                .any(|op| matches!(op, LogicalOp::CheckoutRepo))
-        );
+        assert!(build.ops.iter().any(
+            |op| matches!(op, LogicalOp::SemanticOp { action, .. } if action == "scm.checkout")
+        ));
         // SourceTree is never transferred.
         assert!(
             !build

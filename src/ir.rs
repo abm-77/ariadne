@@ -346,7 +346,7 @@ pub enum Implementation {
         #[serde(default, skip_serializing_if = "HashMap::is_empty")]
         env: HashMap<String, String>,
     },
-    /// A VCS checkout (the planner maps this to LogicalOp::CheckoutRepo).
+    /// A VCS checkout (the planner lowers this to a `scm.checkout` SemanticOp).
     Checkout,
     /// A high-level semantic action (e.g. "build.python_wheel"). The planner's
     /// backend-agnostic lowering selects a concrete implementation from the

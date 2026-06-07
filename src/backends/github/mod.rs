@@ -154,7 +154,7 @@ fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<GhStep> {
                     m.insert("path".into(), format!(".cache/{key}"));
                     (format!("Save cache {key}"), Some(m))
                 }
-                LogicalOp::Native { id, args, .. } => {
+                LogicalOp::SemanticOp { action, args, .. } => {
                     let with = if args.is_empty() {
                         None
                     } else {
@@ -165,7 +165,7 @@ fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<GhStep> {
                         .get("name")
                         .and_then(|v| v.as_str())
                         .map(str::to_string)
-                        .unwrap_or_else(|| format!("{id} ({uses_ref})"));
+                        .unwrap_or_else(|| format!("{action} ({uses_ref})"));
                     (name, with)
                 }
                 _ => {
@@ -186,12 +186,29 @@ fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<GhStep> {
             }]
         }
         "github.run.native" => {
-            let LogicalOp::Native { id, fallback, .. } = op else {
+            let LogicalOp::SemanticOp {
+                label,
+                fallback,
+                env,
+                ..
+            } = op
+            else {
                 return vec![];
             };
+            let mut sorted_env: Vec<_> = env.iter().collect();
+            sorted_env.sort_by_key(|(k, _)| k.as_str());
+            let env_map: IndexMap<_, _> = sorted_env
+                .into_iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             vec![GhStep {
-                name: format!("Run {id}"),
+                name: format!("Run {label}"),
                 run: Some(fallback.clone()),
+                env: if env_map.is_empty() {
+                    None
+                } else {
+                    Some(env_map)
+                },
                 ..Default::default()
             }]
         }
@@ -787,7 +804,7 @@ mod tests {
     fn catalogue_has_standard_entries() {
         let cat = instructions::catalogue();
         let ids: Vec<_> = cat.all().iter().map(|i| i.id.0.as_str()).collect();
-        assert!(ids.contains(&"github.checkout.default"));
+        assert!(ids.contains(&"github.checkout.native"));
         assert!(ids.contains(&"github.shell.run"));
         assert!(ids.contains(&"github.artifact.upload"));
         assert!(ids.contains(&"github.artifact.download"));
@@ -801,8 +818,16 @@ mod tests {
         let backend = GithubActionsBackend::default();
         let sel = Selector::for_backend(&backend);
         let caps = instructions::capabilities();
-        let result = sel.select(&LogicalOp::CheckoutRepo, &caps, &[]);
-        assert_eq!(result.unwrap().instruction.id.0, "github.checkout.default");
+        let op = LogicalOp::SemanticOp {
+            action: "scm.checkout".into(),
+            implementation: "git".into(),
+            label: "checkout".into(),
+            args: Default::default(),
+            fallback: "git checkout .".into(),
+            env: Default::default(),
+        };
+        let result = sel.select(&op, &caps, &[]);
+        assert_eq!(result.unwrap().instruction.id.0, "github.checkout.native");
     }
 
     #[test]
@@ -810,8 +835,16 @@ mod tests {
         let backend = GithubActionsBackend::default();
         let sel = Selector::for_backend(&backend);
         let caps = instructions::capabilities();
-        let selected = sel.select(&LogicalOp::CheckoutRepo, &caps, &[]).unwrap();
-        let steps = lower_op(&LogicalOp::CheckoutRepo, selected.instruction);
+        let op = LogicalOp::SemanticOp {
+            action: "scm.checkout".into(),
+            implementation: "git".into(),
+            label: "checkout".into(),
+            args: Default::default(),
+            fallback: "git checkout .".into(),
+            env: Default::default(),
+        };
+        let selected = sel.select(&op, &caps, &[]).unwrap();
+        let steps = lower_op(&op, selected.instruction);
         assert_eq!(steps[0].uses.as_deref(), Some("actions/checkout@v4"));
         assert_eq!(steps[0].name, "Checkout repository");
     }

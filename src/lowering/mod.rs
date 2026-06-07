@@ -46,15 +46,14 @@ pub enum LoweringBody {
     ContainerExec { image: String, script: String },
     /// An ordered sequence of bodies.
     StepSequence(Vec<LoweringBody>),
-    /// A portable semantic instruction a backend may upgrade to a native step
-    /// (e.g. a GitHub `uses:` action) at emit time via its catalogue. `fallback`
-    /// is the shell command any backend can run when it has no native mapping,
-    /// keeping the plan portable and a legal plan always available. Choosing the
-    /// native step is an emit-time, backend-aware decision, never a plan-time one.
+    /// A semantic instruction with native-step `args` plus a shell `fallback`
+    /// any backend can run when it has no native mapping, keeping the plan
+    /// portable and a legal plan always available. Choosing the native step is
+    /// an emit-time, backend-aware decision, never a plan-time one. The action
+    /// id is known from the `LoweringDef`, so it is not repeated here.
     /// `scm.checkout` is just an instance of this: fallback `git checkout .`,
     /// upgraded to `actions/checkout@v4` on GitHub.
     Native {
-        id: String,
         args: BTreeMap<String, String>,
         fallback: String,
     },
@@ -98,27 +97,23 @@ impl Candidate for LoweringDef {
     }
 }
 
-/// The concrete realization handed to the planner. Maps onto the existing
-/// LogicalOp vocabulary so backends need no knowledge of semantic actions.
+/// The specified op handed to the planner: how the chosen implementation
+/// realizes the action. `args` are native-step inputs (usually empty) and
+/// `fallback` is the shell command every backend can run; backends decide at
+/// emit time whether to upgrade to a native step.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Realization {
-    Shell(String),
-    /// A portable semantic instruction with a shell fallback; backends decide
-    /// emit-time whether to upgrade it to a native step.
-    Native {
-        id: String,
-        args: BTreeMap<String, String>,
-        fallback: String,
-    },
+pub struct Specification {
+    pub args: BTreeMap<String, String>,
+    pub fallback: String,
 }
 
-/// The outcome of selection: the chosen lowering, what it realizes to, and a
+/// The outcome of selection: the chosen lowering, what it specifies to, and a
 /// human-readable reason for explainability.
 #[derive(Debug, Clone)]
 pub struct Selection {
     pub lowering_id: String,
     pub implementation: String,
-    pub realization: Realization,
+    pub specification: Specification,
     pub reason: String,
     /// Names of tools the chosen implementation needs (resolved against the
     /// `dependency` store for install-on-start emission).
@@ -212,7 +207,7 @@ impl Registry {
             return Ok(Selection {
                 lowering_id: def.id.to_string(),
                 implementation: def.implementation.to_string(),
-                realization: realize((def.build)(args)),
+                specification: specify((def.build)(args)),
                 reason: format!("call pins implementation '{want}' for {action}"),
                 dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
                 warnings: Vec::new(),
@@ -269,7 +264,7 @@ impl Registry {
                 return Ok(Selection {
                     lowering_id: def.id.to_string(),
                     implementation: def.implementation.to_string(),
-                    realization: realize((def.build)(args)),
+                    specification: specify((def.build)(args)),
                     reason: format!("scope prefers '{want}' for {action}"),
                     dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
                     warnings: Vec::new(),
@@ -319,7 +314,7 @@ impl Registry {
         Ok(Selection {
             lowering_id: def.id.to_string(),
             implementation: def.implementation.to_string(),
-            realization: realize((def.build)(args)),
+            specification: specify((def.build)(args)),
             reason: format!("selected lowering '{}': {why}", def.id),
             dependencies: def.dependencies.iter().map(|s| s.to_string()).collect(),
             warnings,
@@ -327,23 +322,25 @@ impl Registry {
     }
 }
 
-/// Flatten a structured body into the planner's realization vocabulary. Exec
-/// bodies become shell scripts (the container image is informational at this
-/// layer, matching how the planner treats container implementations today).
-fn realize(body: LoweringBody) -> Realization {
+/// Flatten a structured body into the specified op handed to the planner. Exec
+/// bodies become a shell fallback with no native args (the container image is
+/// informational at this layer, matching how the planner treats container
+/// implementations today); a Native body carries its args through.
+fn specify(body: LoweringBody) -> Specification {
     match body {
-        LoweringBody::LocalExec { script } => Realization::Shell(script),
-        LoweringBody::ContainerExec { script, .. } => Realization::Shell(script),
-        LoweringBody::Native { id, args, fallback } => Realization::Native { id, args, fallback },
-        LoweringBody::StepSequence(bodies) => {
-            let mut lines = Vec::new();
-            for b in bodies {
-                match realize(b) {
-                    Realization::Shell(s) => lines.push(s),
-                    Realization::Native { fallback, .. } => lines.push(fallback),
-                }
+        LoweringBody::LocalExec { script } | LoweringBody::ContainerExec { script, .. } => {
+            Specification {
+                args: Default::default(),
+                fallback: script,
             }
-            Realization::Shell(lines.join("\n"))
+        }
+        LoweringBody::Native { args, fallback } => Specification { args, fallback },
+        LoweringBody::StepSequence(bodies) => {
+            let lines: Vec<String> = bodies.into_iter().map(|b| specify(b).fallback).collect();
+            Specification {
+                args: Default::default(),
+                fallback: lines.join("\n"),
+            }
         }
     }
 }
@@ -486,29 +483,25 @@ mod tests {
         let pip = reg()
             .select_using("package.install", &a, None, &[], Some("pip"), &[])
             .unwrap();
-        assert!(matches!(pip.realization, Realization::Shell(s) if s == "pip install maturin"));
+        assert_eq!(pip.specification.fallback, "pip install maturin");
 
         let mut g = Args::new();
         g.insert("package".into(), json!("git"));
         let apt = reg()
             .select_using("package.install", &g, None, &[], Some("apt"), &[])
             .unwrap();
-        assert!(
-            matches!(apt.realization, Realization::Shell(s) if s == "sudo apt-get install -y git")
-        );
+        assert_eq!(apt.specification.fallback, "sudo apt-get install -y git");
         let dnf = reg()
             .select_using("package.install", &g, None, &[], Some("dnf"), &[])
             .unwrap();
-        assert!(matches!(dnf.realization, Realization::Shell(s) if s == "sudo dnf install -y git"));
+        assert_eq!(dnf.specification.fallback, "sudo dnf install -y git");
 
         let mut c = Args::new();
         c.insert("package".into(), json!("cargo-llvm-cov"));
         let cargo = reg()
             .select_using("package.install", &c, None, &[], Some("cargo"), &[])
             .unwrap();
-        assert!(
-            matches!(cargo.realization, Realization::Shell(s) if s == "cargo install cargo-llvm-cov")
-        );
+        assert_eq!(cargo.specification.fallback, "cargo install cargo-llvm-cov");
     }
 
     #[test]
@@ -520,17 +513,11 @@ mod tests {
     }
 
     #[test]
-    fn checkout_realizes_to_native_with_git_fallback() {
+    fn checkout_specifies_to_git_fallback() {
         let sel = reg()
             .select("scm.checkout", &Args::new(), None, &[])
             .unwrap();
-        match &sel.realization {
-            Realization::Native { id, fallback, .. } => {
-                assert_eq!(id, "scm.checkout");
-                assert_eq!(fallback, "git checkout .");
-            }
-            other => panic!("expected Native, got {other:?}"),
-        }
+        assert_eq!(sel.specification.fallback, "git checkout .");
         assert_eq!(sel.implementation, "git");
         assert_eq!(sel.lowering_id, "scm.checkout.git");
     }
@@ -565,17 +552,12 @@ mod tests {
     }
 
     #[test]
-    fn publish_realizes_to_native_with_shell_fallback() {
+    fn publish_specifies_to_shell_fallback() {
         let mut a = Args::new();
         a.insert("dist".into(), json!("dist/*.whl"));
         let sel = reg().select("package.publish", &a, None, &[]).unwrap();
-        match sel.realization {
-            Realization::Native { id, fallback, .. } => {
-                assert_eq!(id, "package.publish");
-                assert_eq!(fallback, "twine upload dist/*.whl");
-            }
-            other => panic!("expected Native, got {other:?}"),
-        }
+        assert_eq!(sel.lowering_id, "package.publish.twine");
+        assert_eq!(sel.specification.fallback, "twine upload dist/*.whl");
     }
 
     #[test]
@@ -632,8 +614,8 @@ mod tests {
             .select("build.binary", &a, Some(&inv(vec![used("cargo")])), &[])
             .unwrap();
         assert_eq!(
-            sel.realization,
-            Realization::Shell("cargo build --release --package loom".into())
+            sel.specification.fallback,
+            "cargo build --release --package loom"
         );
     }
 
@@ -645,11 +627,8 @@ mod tests {
         a.insert("out".into(), json!("dist"));
         let sel = reg().select("build.python_wheel", &a, None, &[]).unwrap();
         assert_eq!(
-            sel.realization,
-            Realization::Shell(
-                "maturin build --release --manifest-path crates/ariadne-py/Cargo.toml --out dist"
-                    .into()
-            )
+            sel.specification.fallback,
+            "maturin build --release --manifest-path crates/ariadne-py/Cargo.toml --out dist"
         );
     }
 
@@ -660,10 +639,7 @@ mod tests {
         let cargo = reg()
             .select("test.unit", &a, Some(&inv(vec![used("cargo")])), &[])
             .unwrap();
-        assert_eq!(
-            cargo.realization,
-            Realization::Shell("cargo test --workspace".into())
-        );
+        assert_eq!(cargo.specification.fallback, "cargo test --workspace");
 
         let mut b = Args::new();
         b.insert("paths".into(), json!(["tests/"]));
@@ -671,10 +647,7 @@ mod tests {
         let py = reg()
             .select("test.unit", &b, Some(&inv(vec![used("pytest")])), &[])
             .unwrap();
-        assert_eq!(
-            py.realization,
-            Realization::Shell("pytest tests/ -v".into())
-        );
+        assert_eq!(py.specification.fallback, "pytest tests/ -v");
     }
 
     #[test]
@@ -686,10 +659,7 @@ mod tests {
         let cargo = reg()
             .select_using("test.unit", &a, Some(&i), &[], Some("cargo"), &[])
             .unwrap();
-        assert_eq!(
-            cargo.realization,
-            Realization::Shell("cargo test --workspace".into())
-        );
+        assert_eq!(cargo.specification.fallback, "cargo test --workspace");
         assert!(cargo.reason.contains("pins implementation 'cargo'"));
 
         let mut b = Args::new();
@@ -697,7 +667,7 @@ mod tests {
         let py = reg()
             .select_using("test.unit", &b, Some(&i), &[], Some("pytest"), &[])
             .unwrap();
-        assert_eq!(py.realization, Realization::Shell("pytest tests/".into()));
+        assert_eq!(py.specification.fallback, "pytest tests/");
     }
 
     #[test]
@@ -751,8 +721,8 @@ mod tests {
         let sel = r.select("build.python_wheel", &a, Some(&i), &[]).unwrap();
         assert_eq!(sel.lowering_id, "build.python_wheel.company");
         assert_eq!(
-            sel.realization,
-            Realization::Shell("company-build-wheel --package ariadne-bindings".into())
+            sel.specification.fallback,
+            "company-build-wheel --package ariadne-bindings"
         );
     }
 }

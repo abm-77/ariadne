@@ -7,7 +7,6 @@ use super::{LoweringBody, Registry, arg_flag, arg_list, arg_str, def, local};
 pub fn register(r: &mut Registry) {
     r.register(def("scm.checkout.git", "scm.checkout", "git", |_| {
         LoweringBody::Native {
-            id: "scm.checkout".into(),
             args: Default::default(),
             fallback: "git checkout .".into(),
         }

@@ -130,19 +130,6 @@ pub(crate) fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<String> {
     match kind {
         "process.exec" => match op {
             LogicalOp::RunShell { script, .. } => vec![script.clone()],
-            LogicalOp::CheckoutRepo => {
-                let argv: Vec<&str> = instr
-                    .implementation
-                    .get("argv")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                    .unwrap_or_default();
-                if argv.is_empty() {
-                    vec![]
-                } else {
-                    vec![argv.join(" ")]
-                }
-            }
             _ => vec![],
         },
         "local.copy" => match op {
@@ -189,7 +176,7 @@ pub(crate) fn lower_op(op: &LogicalOp, instr: &Instruction) -> Vec<String> {
         },
         "local.noop" => vec![],
         "local.native" => match op {
-            LogicalOp::Native { fallback, .. } => vec![fallback.clone()],
+            LogicalOp::SemanticOp { fallback, .. } => vec![fallback.clone()],
             _ => vec![],
         },
         _ => vec![],
@@ -238,7 +225,15 @@ mod tests {
         let backend = LocalBackend::podman();
         let sel = Selector::for_backend(&backend);
         let caps = instructions::capabilities();
-        assert!(sel.select(&LogicalOp::CheckoutRepo, &caps, &[]).is_some());
+        let checkout = LogicalOp::SemanticOp {
+            action: "scm.checkout".into(),
+            implementation: "git".into(),
+            label: "checkout".into(),
+            args: Default::default(),
+            fallback: "git checkout .".into(),
+            env: Default::default(),
+        };
+        assert!(sel.select(&checkout, &caps, &[]).is_some());
         let run = LogicalOp::RunShell {
             label: "x".into(),
             script: "echo hi".into(),
