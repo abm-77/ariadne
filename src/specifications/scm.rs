@@ -1,4 +1,4 @@
-use super::{LoweringBody, Registry, arg_flag, arg_list, arg_str, def, local};
+use super::{Registry, SpecificationBody, arg_flag, arg_list, arg_str, def, local};
 
 /// Source-control lowerings. `scm.checkout` is a portable Native op: the shell
 /// fallback is `git checkout .`, which any backend can run; GitHub upgrades it
@@ -6,7 +6,7 @@ use super::{LoweringBody, Registry, arg_flag, arg_list, arg_str, def, local};
 /// the given paths and commits (and optionally pushes) them via git.
 pub fn register(r: &mut Registry) {
     r.register(def("scm.checkout.git", "scm.checkout", "git", |_| {
-        LoweringBody::Native {
+        SpecificationBody::Native {
             args: Default::default(),
             fallback: "git checkout .".into(),
         }

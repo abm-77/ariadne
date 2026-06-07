@@ -25,8 +25,8 @@ The project thesis:
 Thread IR has five first-class semantic entities:
 
 - Artifact: typed immutable logical data, such as Wheel, Binary, ContainerImage, SBOM, TestReport, Model.
-- Action: computation that consumes artifacts, produces artifacts, and may emit effects.
-- Effect: external mutation or privileged interaction, such as Deployment, PublishRelease, SecretAccess, GitWrite.
+- Action: computation that consumes artifacts, produces artifacts, and may carry consequences.
+- Consequence: external mutation or privileged interaction, such as Network, SecretAccess, GitWrite, PublishRelease, Deployment, CommentOnPr.
 - Placement: physical realization/access strategy for an artifact, such as GitHub artifact, shared volume, cache, registry, local path.
 - Actor: execution resource, such as github-ubuntu, self-hosted-gpu, local-docker.
 
@@ -46,10 +46,11 @@ Thread IR is the boundary between frontends and Ariadne.
 
 Every operation in a plan has one uniform identity: a `dialect.action` (the
 logical op), specified to an implementation as `dialect.action.impl` (the
-specified op), then lowered to a backend physical step. Two selection phases on
-one shared engine (`select.rs`): implementation selection (`lowering/`, plan-time,
-backend-agnostic) then instruction selection (each backend's `Catalogue`,
-emit-time). Instruction selection keys on `(action, implementation)`.
+specified op), then lowered to a backend physical step. Two phases on one shared
+engine (`select.rs`): specification (`specifications/`, plan-time, backend-agnostic)
+binds the logical op to an implementation, then instruction selection (each
+backend's `Catalogue`, emit-time) lowers it to a native step. Instruction
+selection keys on `(action, implementation)`.
 
 - `LogicalOp::SemanticOp { action, implementation, label, args, fallback, env }`
   is the user-domain compute carrier (build/test/fmt/scm.checkout/package.publish/...).
@@ -84,8 +85,8 @@ Do not introduce LLVM or MLIR. The hard problem is domain planning, not machine-
 ## Workspace Layout
 
 Two crates only. The engine is ONE library crate; the CLI is a thin binary.
-We do not ship the phases independently — `ariadne` is the lib frontend bindings
-link to run the engine in-process.
+We do not ship the phases independently. `ariadne` is the lib; frontend bindings
+link it to run the engine in-process.
 
 ```text
 ariadne/            (root lib crate; module per phase)
@@ -95,8 +96,8 @@ ariadne/            (root lib crate; module per phase)
     diagnostics.rs
     select.rs       shared selection substrate (Capability, Candidate, Registry, resolve)
     validate.rs
-    lowering/       implementation selection (plan-time): semantic action -> impl
-    planner.rs      Plan + LogicalOp (SemanticOp + ci.* ops); runs lowering selection
+    specifications/ specification (plan-time): semantic action -> impl
+    planner.rs      Plan + LogicalOp (SemanticOp + ci.* ops); runs specification
     cost.rs profile.rs analysis.rs optimize/   optional optimization
     backends/
       mod.rs        Backend trait, Catalogue, Selector, instruction selection
@@ -110,10 +111,10 @@ frontends/
   python/ariadne/   Python authoring frontend (semantic actions + Inventory)
 ```
 
-Keep the logical layering even though it is one crate — modules flow inward to
-outward: `ir -> diagnostics -> validate -> lowering -> planner -> backends`,
+Keep the logical layering even though it is one crate. Modules flow inward to
+outward: `ir -> diagnostics -> validate -> specification -> planner -> backends`,
 with `proto` beside `ir` and `select` as the shared base both selection sites
-(lowering, backends) stand on. Do not let `ir` depend on planner, backends, or
+(specification, backends) stand on. Do not let `ir` depend on planner, backends, or
 filesystem/Docker code.
 
 ## TIR Serialization
@@ -133,7 +134,7 @@ Test categories:
 - Thread IR serialization/deserialization
 - validation
 - type checking
-- effect safety
+- consequence safety
 - placement fallback
 - placement optimization
 - policy constraints
@@ -145,7 +146,7 @@ Important invariant tests:
 
 - backend lacks mounts -> copy fallback works with warning
 - backend supports mounts -> large shared artifact uses mount when legal
-- deployment effect -> not deduplicated or reordered before tests
+- deployment consequence -> not deduplicated or reordered before tests
 - policy max_parallel_jobs = 10 -> plan never exceeds 10
 - GitHub hosted backend -> cross-job mount unavailable -> upload/download fallback
 
@@ -166,12 +167,12 @@ loom simulate
 `loom test` should support assertions over:
 
 - expected artifacts
-- expected effects
+- expected consequences
 - policy compliance
 - backend compatibility
 - event fixtures
 - generated backend output
-- unsafe effect gating
+- unsafe consequence gating
 
 Event fixtures should allow testing contexts such as:
 
@@ -208,7 +209,7 @@ Avoid backend-specific assumptions in Thread IR.
 
 Avoid optimizing before there is a correctness baseline.
 
-Avoid hiding effectful behavior inside shell actions without declaring effects.
+Avoid hiding privileged behavior inside shell actions without declaring consequences.
 
 ## Shell Actions
 
@@ -218,7 +219,7 @@ Shell actions should declare:
 
 - inputs
 - outputs
-- effects
+- consequences
 - environment
 - secrets
 - capture rules

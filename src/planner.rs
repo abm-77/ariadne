@@ -188,17 +188,17 @@ pub fn transfer_access_name(access: &AccessMode) -> &'static str {
 /// flow through here, so checkout is a normal `scm.checkout` SemanticOp whose
 /// shell fallback (`git checkout .`) a backend may upgrade to a native step.
 fn checkout_op(
-    registry: &crate::lowering::Registry,
+    registry: &crate::specifications::Registry,
     inv: Option<&ir::Inventory>,
     caps: &[crate::select::Capability],
 ) -> LogicalOp {
-    let args = crate::lowering::Args::new();
+    let args = crate::specifications::Args::new();
     let (implementation, spec) =
         match registry.select_using("scm.checkout", &args, inv, caps, None, &[]) {
             Ok(sel) => (sel.implementation, sel.specification),
             Err(_) => (
                 "git".to_string(),
-                crate::lowering::Specification {
+                crate::specifications::Specification {
                     args: Default::default(),
                     fallback: "git checkout .".into(),
                 },
@@ -374,7 +374,7 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
     let mut unit_id_for_action: HashMap<ActionCallId, Ustr> = HashMap::new();
     let mut units: Vec<ExecutionUnit> = Vec::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
-    let lowering_registry = crate::lowering::Registry::builtin();
+    let lowering_registry = crate::specifications::Registry::builtin();
     // Shared dependency table, populated as lowerings are selected; units only
     // hold tool names that reference it. Each tool resolves (once) to its install
     // command via the `package.install` lowerings, so the manager (pip/apt/...)
@@ -530,7 +530,7 @@ pub fn plan_for(workflow: &Workflow, event: &EventContext) -> Result<Plan, Vec<D
                                 .manager
                                 .clone()
                                 .unwrap_or_else(|| system_manager(workflow.inventory.as_ref()));
-                            let mut iargs = crate::lowering::Args::new();
+                            let mut iargs = crate::specifications::Args::new();
                             iargs.insert(
                                 "package".into(),
                                 serde_json::Value::String(pref.package.clone()),

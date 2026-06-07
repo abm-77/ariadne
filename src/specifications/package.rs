@@ -1,4 +1,4 @@
-use super::{LoweringBody, Registry, arg_str, def, local};
+use super::{Registry, SpecificationBody, arg_str, def, local};
 use std::collections::BTreeMap;
 
 /// Package lowerings: publishing and installing. Publishing is a portable Native
@@ -18,7 +18,7 @@ pub fn register(r: &mut Registry) {
             if let Some(repo) = arg_str(a, "registry") {
                 args.insert("repository".into(), repo);
             }
-            LoweringBody::Native {
+            SpecificationBody::Native {
                 args,
                 fallback: format!("twine upload {dist}"),
             }

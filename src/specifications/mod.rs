@@ -1,21 +1,21 @@
-//! Extensible lowering model.
+//! Extensible specification model.
 //!
 //! A semantic action (e.g. `build.python_wheel`) does not name a tool. A
-//! `LoweringDef` teaches Ariadne how one implementation (e.g. `maturin`)
-//! realizes one action. Lowerings are data records held in a `Registry`;
+//! `SpecificationDef` teaches Ariadne how one implementation (e.g. `maturin`)
+//! realizes one action. Specifications are data records held in a `Registry`;
 //! built-in packs (one module per high-level class) register defaults and
 //! callers may register their own. The inventory declares which implementations
-//! are available; selection finds the compatible lowerings and picks one by
+//! are available; selection finds the compatible specifications and picks one by
 //! preference, then cost, then stability.
 //!
-//! Lowerings are never user-facing: workflow authors choose semantic actions,
-//! inventory authors choose implementations, lowering authors teach Ariadne how
-//! an implementation realizes an action.
+//! Specifications are never user-facing: workflow authors choose semantic
+//! actions, inventory authors choose implementations, specification authors
+//! teach Ariadne how an implementation realizes an action.
 //!
-//! This is *implementation selection* (plan-time, backend-agnostic). It is a
-//! distinct layer from *instruction selection* (emit-time), which lives in each
-//! backend's `instructions.rs` Catalogue and renders the resulting portable
-//! `LogicalOp`s as native steps.
+//! This is *specification* (plan-time, backend-agnostic): it binds a logical op
+//! to an implementation. It is a distinct phase from *instruction selection*
+//! (emit-time), which lives in each backend's `instructions.rs` Catalogue and
+//! renders the resulting portable `LogicalOp`s as native steps.
 
 mod build;
 mod coverage;
@@ -39,18 +39,18 @@ pub type Args = BTreeMap<String, Value>;
 /// A structured, inspectable lowering body composed from typed execution
 /// primitives. Ariadne does not introduce a lowering DSL.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LoweringBody {
+pub enum SpecificationBody {
     /// Run a script directly on the actor.
     LocalExec { script: String },
     /// Run a script inside a container image.
     ContainerExec { image: String, script: String },
     /// An ordered sequence of bodies.
-    StepSequence(Vec<LoweringBody>),
+    StepSequence(Vec<SpecificationBody>),
     /// A semantic instruction with native-step `args` plus a shell `fallback`
     /// any backend can run when it has no native mapping, keeping the plan
     /// portable and a legal plan always available. Choosing the native step is
     /// an emit-time, backend-aware decision, never a plan-time one. The action
-    /// id is known from the `LoweringDef`, so it is not repeated here.
+    /// id is known from the `SpecificationDef`, so it is not repeated here.
     /// `scm.checkout` is just an instance of this: fallback `git checkout .`,
     /// upgraded to `actions/checkout@v4` on GitHub.
     Native {
@@ -63,7 +63,7 @@ pub enum LoweringBody {
 /// structured body from the call's args, so conditional shaping stays in code
 /// while the produced body stays structured.
 #[derive(Clone)]
-pub struct LoweringDef {
+pub struct SpecificationDef {
     pub id: &'static str,
     pub action: &'static str,
     pub implementation: &'static str,
@@ -74,10 +74,10 @@ pub struct LoweringDef {
     /// provided unless the workflow opts into installing dependencies.
     pub dependencies: Vec<&'static str>,
     pub stability: Stability,
-    pub build: fn(&Args) -> LoweringBody,
+    pub build: fn(&Args) -> SpecificationBody,
 }
 
-impl LoweringDef {
+impl SpecificationDef {
     /// Declare the tools this implementation needs, by name.
     pub(crate) fn with_deps(mut self, tools: &[&'static str]) -> Self {
         self.dependencies = tools.to_vec();
@@ -85,7 +85,7 @@ impl LoweringDef {
     }
 }
 
-impl Candidate for LoweringDef {
+impl Candidate for SpecificationDef {
     fn key(&self) -> &str {
         self.action
     }
@@ -124,11 +124,11 @@ pub struct Selection {
 }
 
 /// A collection of lowering definitions, keyed by semantic action. This is the
-/// shared `select::Registry` specialized to `LoweringDef`; the methods below add
+/// shared `select::Registry` specialized to `SpecificationDef`; the methods below add
 /// the lowering-specific `builtin` set and `select` policy. Built-in packs
 /// register defaults; callers (and, in future, distributed lowering packages)
 /// may register more.
-pub type Registry = crate::select::Registry<LoweringDef>;
+pub type Registry = crate::select::Registry<SpecificationDef>;
 
 impl Registry {
     /// The registry with all built-in lowering packs registered.
@@ -174,7 +174,7 @@ impl Registry {
         using: Option<&str>,
         prefer: &[String],
     ) -> Result<Selection, Diagnostic> {
-        let cands: Vec<&LoweringDef> = self.candidates(action).collect();
+        let cands: Vec<&SpecificationDef> = self.candidates(action).collect();
         if cands.is_empty() {
             return Err(Diagnostic::error(
                 DiagCode::UnknownSemanticOp,
@@ -226,7 +226,7 @@ impl Registry {
         // Inventory preference is this layer's soft ranking: prefer (0) beats
         // declared-available (1) beats undeclared default (2). It never excludes
         // (silent inventory still yields a default) — deny does the excluding.
-        let priority = |d: &LoweringDef| {
+        let priority = |d: &SpecificationDef| {
             if preferred(d.implementation) {
                 0
             } else if available(d.implementation) {
@@ -238,7 +238,7 @@ impl Registry {
 
         // Deny is the lowering-specific exclusion; the actor-capability gate is
         // hard. Materialize the eligible candidates once.
-        let eligible: Vec<&LoweringDef> = cands
+        let eligible: Vec<&SpecificationDef> = cands
             .iter()
             .copied()
             .filter(|d| !denied(d.implementation))
@@ -326,16 +326,15 @@ impl Registry {
 /// bodies become a shell fallback with no native args (the container image is
 /// informational at this layer, matching how the planner treats container
 /// implementations today); a Native body carries its args through.
-fn specify(body: LoweringBody) -> Specification {
+fn specify(body: SpecificationBody) -> Specification {
     match body {
-        LoweringBody::LocalExec { script } | LoweringBody::ContainerExec { script, .. } => {
-            Specification {
-                args: Default::default(),
-                fallback: script,
-            }
-        }
-        LoweringBody::Native { args, fallback } => Specification { args, fallback },
-        LoweringBody::StepSequence(bodies) => {
+        SpecificationBody::LocalExec { script }
+        | SpecificationBody::ContainerExec { script, .. } => Specification {
+            args: Default::default(),
+            fallback: script,
+        },
+        SpecificationBody::Native { args, fallback } => Specification { args, fallback },
+        SpecificationBody::StepSequence(bodies) => {
             let lines: Vec<String> = bodies.into_iter().map(|b| specify(b).fallback).collect();
             Specification {
                 args: Default::default(),
@@ -372,8 +371,8 @@ pub(crate) fn arg_list(args: &Args, key: &str) -> Vec<String> {
     }
 }
 
-pub(crate) fn local(parts: Vec<String>) -> LoweringBody {
-    LoweringBody::LocalExec {
+pub(crate) fn local(parts: Vec<String>) -> SpecificationBody {
+    SpecificationBody::LocalExec {
         script: parts.join(" "),
     }
 }
@@ -381,8 +380,8 @@ pub(crate) fn local(parts: Vec<String>) -> LoweringBody {
 /// Run inside a container image. No built-in pack uses this today; it remains
 /// for lowering authors (and is exercised by tests).
 #[cfg(test)]
-pub(crate) fn container(image: &str, parts: Vec<String>) -> LoweringBody {
-    LoweringBody::ContainerExec {
+pub(crate) fn container(image: &str, parts: Vec<String>) -> SpecificationBody {
+    SpecificationBody::ContainerExec {
         image: image.to_string(),
         script: parts.join(" "),
     }
@@ -396,9 +395,9 @@ pub(crate) fn def(
     id: &'static str,
     action: &'static str,
     implementation: &'static str,
-    build: fn(&Args) -> LoweringBody,
-) -> LoweringDef {
-    LoweringDef {
+    build: fn(&Args) -> SpecificationBody,
+) -> SpecificationDef {
+    SpecificationDef {
         id,
         action,
         implementation,
@@ -581,7 +580,7 @@ mod tests {
     #[test]
     fn unmet_requirement_excludes_candidate() {
         let mut r = Registry::new();
-        r.register(LoweringDef {
+        r.register(SpecificationDef {
             id: "build.container_image.docker",
             action: "build.container_image",
             implementation: "docker",
@@ -697,7 +696,7 @@ mod tests {
     #[test]
     fn user_registered_lowering_is_selected_when_preferred() {
         let mut r = Registry::builtin();
-        r.register(LoweringDef {
+        r.register(SpecificationDef {
             id: "build.python_wheel.company",
             action: "build.python_wheel",
             implementation: "company-wheel-builder",

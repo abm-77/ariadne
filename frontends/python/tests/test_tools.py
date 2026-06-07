@@ -272,7 +272,7 @@ class TestImplBinding:
 
         @test_case(backend="github")
         def runners_disambiguated():
-            expect.selected_instruction("RunShell", "github.shell.run")
+            expect.selected_instruction("test.unit", "github.semantic.fallback")
 
         results = Pipeline(ci()).run_tests(runners_disambiguated)
         assert results.passed, results.report()

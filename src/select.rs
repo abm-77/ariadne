@@ -48,7 +48,7 @@ pub fn stability_rank(s: Stability) -> u8 {
     }
 }
 
-/// A selectable rule. Implemented by `lowering::LoweringDef` and
+/// A selectable rule. Implemented by `specifications::SpecificationDef` and
 /// `backends::Instruction`.
 pub trait Candidate {
     /// The lookup key this rule is indexed under (a semantic action id for

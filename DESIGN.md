@@ -8,7 +8,7 @@ Modern CI/CD systems force engineers to manually plan execution: jobs, dependenc
 
 Ariadne separates workflow semantics from execution strategy.
 
-Users describe artifacts, actions, effects, constraints, and policies. Ariadne generates a correct execution plan, optimizes artifact movement and runner placement, supports local execution, explains decisions, and emits standard CI configurations.
+Users describe artifacts, actions, consequences, constraints, and policies. Ariadne generates a correct execution plan, optimizes artifact movement and runner placement, supports local execution, explains decisions, and emits standard CI configurations.
 
 The Python package `ariadne` is the reference authoring frontend; Loom is the CLI over Thread IR.
 
@@ -70,8 +70,8 @@ Ariadne owns:
 - Thread IR and its validation
 - the Inventory (actors, placements, implementations)
 - action and implementation definitions
-- lowering definitions (implementation selection)
-- type/effect analysis
+- lowering definitions (specification)
+- type/consequence analysis
 - placement planning and actor selection
 - optimization and profile-guided planning
 - instruction selection and backend emission
@@ -88,7 +88,7 @@ developer commands:
 - `loom explain`
 - `loom docs`
 
-Lowering and selection are part of Ariadne's planning model, not Loom's command model. Ariadne
+Specification and instruction selection are part of Ariadne's planning model, not Loom's command model. Ariadne
 can be used without Loom (any frontend that emits Thread IR works).
 
 ---
@@ -123,7 +123,7 @@ Thread IR has five first-class concepts:
 
 - Artifact
 - Action
-- Effect
+- Consequence
 - Placement
 - Actor
 
@@ -164,7 +164,7 @@ Artifacts are not merely files. They may have multiple physical representations.
 
 ## Action
 
-Actions are computation. They consume artifacts, produce artifacts, and may emit effects.
+Actions are computation. They consume artifacts, produce artifacts, and may carry consequences.
 
 Actions are authored as **semantic intent**, never as tool invocations. A workflow says
 *build a Python wheel*, not *run maturin*. The frontend exposes semantic namespaces:
@@ -197,13 +197,13 @@ the inventory (see Inventory and Selection Model below).
 
 An escape hatch remains for tool-specific or backend-native work: `container(image).exec(...)`
 and `shell(...)` declare an explicit implementation directly. The compiler only trusts what the
-action declares (inputs, outputs, effects).
+action declares (inputs, outputs, consequences).
 
 ---
 
-## Effect
+## Consequence
 
-Effects are external mutation or privileged interaction.
+Consequences are external mutation or privileged interaction.
 
 Examples:
 
@@ -212,9 +212,9 @@ Examples:
 - GitWrite
 - PublishRelease
 - Deployment
-- CommentOnPR
+- CommentOnPr
 
-Effects enable:
+Consequences enable:
 
 - approval gates
 - dry runs
@@ -317,36 +317,36 @@ Lowering author   teaches Ariadne how an implementation realizes an action
 
 ## Selection Model: from `dialect.action` to a native step
 
-Every operation in a plan has one uniform identity: a `dialect.action` (the *logical op*),
-specified to an implementation as `dialect.action.impl` (the *specified op*), then lowered to a
-backend physical step. Two selection phases drive this, and they are the same pattern -
-*capability-gated, ranked, explainable rule resolution* over a registry - running on one shared
-engine (`src/select.rs`): `Capability`, `Stability`, a `Candidate` trait, a generic `Registry<C>`
-(storage + by-key index), and `resolve(candidates, available, priority)` (filter to candidates
-whose required capabilities are all available, then pick the best by `(priority, stability)`,
-ties broken by registration order).
+Every operation in a plan has one uniform identity: a `dialect.action` (the *logical op*).
+**Specification** binds it to an implementation, producing a *specified op* `dialect.action.impl`.
+**Instruction selection** then lowers that to a backend physical step. The two phases are the same
+pattern, *capability-gated, ranked, explainable rule resolution* over a registry, running on one
+shared engine (`src/select.rs`): `Capability`, `Stability`, a `Candidate` trait, a generic
+`Registry<C>` (storage + by-key index), and `resolve(candidates, available, priority)` (filter to
+candidates whose required capabilities are all available, then pick the best by
+`(priority, stability)`, ties broken by registration order).
 
 ```text
 Logical op        dialect.action            e.g. build.binary, scm.checkout, ci.artifact.upload
-    ↓   implementation selection  (plan-time, backend-agnostic)   src/lowering/
+    ↓   specification             (plan-time, backend-agnostic)   src/specifications/
 Specified op      dialect.action.impl       e.g. build.binary.cargo, scm.checkout.git
     ↓   instruction selection     (emit-time, backend-aware)      src/backends/<b>/instructions.rs
 Native step       run: / uses:
 ```
 
-Dialects: `scm` / `build` / `test` / `fmt` / `docs` / `coverage` / `scan` / `sign` / `package` /
-`forge` are user-domain; **`ci` is the orchestration dialect** (`ci.artifact.upload` /
-`download` / `transfer`, `ci.cache.restore` / `save`, `ci.approval`). The raw `shell()` escape
-hatch is `shell.run`. There is no special-cased op kind: build steps and orchestration steps go
-through the same selection.
+Dialects `scm`, `build`, `test`, `fmt`, `docs`, `coverage`, `scan`, `sign`, `package`, and
+`forge` are user-domain. **`ci` is the orchestration dialect** (`ci.artifact.upload`,
+`ci.artifact.download`, `ci.artifact.transfer`, `ci.cache.restore`, `ci.cache.save`,
+`ci.approval`). The raw `shell()` escape hatch is `shell.run`. There is no special-cased op kind:
+build steps and orchestration steps go through the same selection.
 
-### Implementation selection (lowering)
+### Specification (lowering)
 
-A `LoweringDef { id, action, implementation, requires, stability, build }` teaches Ariadne how
+A `SpecificationDef { id, action, implementation, requires, stability, build }` teaches Ariadne how
 one implementation realizes one semantic action; its `build` produces a structured, inspectable
-`LoweringBody` (no DSL), which flattens to a `Specification { args, fallback }` - native-step
-args (usually empty) plus a shell command any backend can run. Lowerings live in an extensible
-`Registry` (`src/lowering/`, one pack module per class). Built-in packs register defaults; callers
+`SpecificationBody` (no DSL), which flattens to a `Specification { args, fallback }`: native-step args
+(usually empty) plus a shell command any backend can run. Lowerings live in an extensible
+`Registry` (`src/specifications/`, one pack module per class). Built-in packs register defaults; callers
 and future distributable packs may register more.
 
 Selection consults the inventory: `deny` excludes; `prefer` then `use` then undeclared-default
@@ -385,7 +385,7 @@ capability), and `build.binary.cargo` - which has no native action - simply runs
 This keeps the plan portable and a legal plan always available, exactly as the correctness
 invariant requires.
 
-The two containers are the same type: `lowering::Registry = select::Registry<LoweringDef>` and
+The two containers are the same type: `specifications::Registry = select::Registry<SpecificationDef>` and
 `backends::Catalogue = select::Registry<Instruction>`. The phases differ only in what
 capabilities are in scope and what a rule produces. One model, run twice over a growing
 capability set.
@@ -401,7 +401,7 @@ Relationships:
 ```text
 Action produces Artifact
 Action consumes Artifact
-Action emits Effect
+Action carries Consequence
 Artifact has Placement
 Action executes on Actor
 ```
@@ -439,7 +439,7 @@ groups, local locks.
 Maximum execution duration per action (`ActionCall.timeout`, e.g. "30m"). A
 backend-independent execution requirement; GitHub emits `timeout-minutes`.
 Retries are intentionally NOT modeled: a failed job is re-run through whatever
-frontend the user already has, and retrying effectful actions is unsafe.
+frontend the user already has, and retrying actions with consequences is unsafe.
 
 ### Resource Requirements
 
@@ -671,9 +671,9 @@ Prefer mount, stream, colocation, or cache placement over repeated copy/download
 
 Select runners with suitable capabilities and lower cost.
 
-### Effect-Aware Optimization
+### Consequence-Aware Optimization
 
-Never reorder unsafe effects.
+Never reorder unsafe consequences.
 
 Deployments, releases, signing, and external mutations preserve ordering guarantees.
 
@@ -814,7 +814,7 @@ Checks:
 - artifact type correctness
 - missing producers
 - illegal cycles
-- effect declarations
+- consequence declarations
 - policy validity
 - backend compatibility
 
@@ -827,7 +827,7 @@ Produces an execution plan without running it.
 Useful for:
 
 - reviewing graph shape
-- checking effects
+- checking consequences
 - checking artifact movement
 - checking runner assignment
 - estimating cost
@@ -843,10 +843,10 @@ Possible checks:
 - validate Thread IR
 - plan for target backend
 - assert expected artifacts
-- assert expected effects
+- assert expected consequences
 - assert policy compliance
 - assert emitted CI is up to date
-- assert unsafe effects are gated
+- assert unsafe consequences are gated
 
 ---
 
@@ -867,8 +867,8 @@ def test_release_plan():
     )
 
     assert plan.has_artifact("wheel")
-    assert plan.has_effect("publish_release")
-    assert plan.effect("publish_release").requires_approval()
+    assert plan.has_consequence("publish_release")
+    assert plan.consequence("publish_release").requires_approval()
     assert plan.max_parallel_jobs <= 16
 ```
 
@@ -878,15 +878,15 @@ These tests do not run expensive jobs. They test workflow structure and semantic
 
 ## Local Integration Tests
 
-Ariadne can locally execute non-effectful parts of a workflow.
+Ariadne can locally execute parts of a workflow that carry no consequences.
 
 Example:
 
 ```bash
-loom run release --local --dry-effects
+loom run release --local --dry-consequences
 ```
 
-Effectful actions are mocked.
+Actions that carry consequences are mocked.
 
 Examples:
 
@@ -925,8 +925,8 @@ Fixtures model:
 Example assertions:
 
 ```python
-assert plan.on_event("pull_request").does_not_have_effect("deploy_prod")
-assert plan.on_event("tag-release").has_effect("publish_release")
+assert plan.on_event("pull_request").does_not_have_consequence("deploy_prod")
+assert plan.on_event("tag-release").has_consequence("publish_release")
 assert plan.on_event("fork-pr").does_not_access_secret("PROD_TOKEN")
 ```
 
@@ -940,7 +940,7 @@ Examples:
 
 ```python
 assert plan.max_parallel_jobs <= 20
-assert plan.no_effects_on_untrusted_pull_request()
+assert plan.no_consequences_on_untrusted_pull_request()
 assert plan.deployments_require_approval()
 assert plan.no_secret_access_in_fork_context()
 assert plan.max_gpu_jobs <= 4
@@ -1025,7 +1025,7 @@ jobs:
       - run: loom check
       - run: loom plan --backend github
       - run: loom emit github --check
-      - run: loom test --local --dry-effects
+      - run: loom test --local --dry-consequences
 ```
 
 This lets CI validate future CI changes before they land.
@@ -1062,7 +1062,7 @@ Compiler features that help agents:
 - explainable plans
 - local simulation
 - plan assertions
-- safe effect mocks
+- safe consequence mocks
 
 Ariadne makes LLM-generated CI safer by moving correctness and planning into the compiler.
 
@@ -1127,10 +1127,10 @@ ariadne/                 root lib crate
     select.rs            shared selection substrate:
                            Capability, Stability, Candidate, Registry<C>, resolve
     validate.rs
-    lowering/            implementation selection (plan-time, backend-agnostic)
-      mod.rs               Registry = select::Registry<LoweringDef>, LoweringBody, select
+    specifications/      specification (plan-time, backend-agnostic): action -> impl
+      mod.rs               Registry = select::Registry<SpecificationDef>, SpecificationBody, select
       scm.rs build.rs test.rs scan.rs sign.rs package.rs forge.rs   built-in packs
-    planner.rs           Plan + LogicalOp (SemanticOp + ci.* ops); runs lowering selection
+    planner.rs           Plan + LogicalOp (SemanticOp + ci.* ops); runs specification
     cost.rs profile.rs analysis.rs optimize/   optional optimization
     backends/
       mod.rs             Backend trait; Catalogue = select::Registry<Instruction>; Selector
@@ -1154,7 +1154,7 @@ diagnostics     │
     ↑           │
 validate        │
     ↑           │
-lowering  ──────┘   (implementation selection)
+specification  ─────┘  (specification phase)
     ↑
 planner
     ↑
@@ -1175,7 +1175,7 @@ Test categories:
 
 - validation tests
 - type-checking tests
-- effect-safety tests
+- consequence-safety tests
 - placement fallback tests
 - placement optimization tests
 - policy constraint tests
@@ -1186,7 +1186,7 @@ Test categories:
 Important invariant tests:
 
 - backend lacks mounts -> copy fallback works
-- deployment effect -> never reordered before tests
+- deployment consequence -> never reordered before tests
 - policy max_parallel_jobs = 10 -> plan never exceeds 10
 - large artifact + mount backend -> mount selected
 - large artifact + GitHub hosted -> copy selected with warning
@@ -1206,7 +1206,7 @@ Important invariant tests:
 ### Milestone 2
 
 - local Docker/Podman backend
-- dry-effect execution
+- dry-consequence execution
 - plan explain
 - golden tests
 

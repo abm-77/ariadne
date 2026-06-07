@@ -78,7 +78,7 @@ def _release_workflow():
 def checkout_emits_native_action():
     # Source is reacquired per job: the consumer's checkout step renders as the
     # native actions/checkout, not a download.
-    expect.selected_instruction("CheckoutRepo", "github.checkout.default")
+    expect.selected_instruction("scm.checkout", "github.checkout.native")
 
 
 @test_case
